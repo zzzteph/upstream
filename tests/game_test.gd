@@ -164,6 +164,10 @@ func _run() -> void:
 	click(pb.get_global_rect().get_center())
 	await frames(1)
 	check(game.paused and game.ui.pause_screen.visible, "the pause button pauses the game")
+	var labels := []
+	for b in game.ui.pause_screen.find_children("*", "Button", true, false):
+		labels.append((b as Button).text)
+	check(labels == ["RESUME", "RESTART", "MAIN MENU"], "the pause menu is just RESUME, RESTART, MAIN MENU (got %s)" % [labels])
 	var cd_p: float = game.countdown
 	await frames(30)
 	check(game.countdown == cd_p, "nothing moves while paused")

@@ -101,7 +101,7 @@ onto the water's path to buy time.
 | Watch the solver play a game | SOLVER on the menu | |
 | Flow-freeze / Reveal | FREEZE / REVEAL buttons in the panel | Q / E |
 | Pause | The pause button at the top of the panel (also pauses by itself when you switch apps) | P / Esc |
-| Mute | In the pause menu | M |
+| Mute | | M |
 | Restart | Play again | R |
 
 ## First-run walkthrough

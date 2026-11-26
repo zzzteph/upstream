@@ -234,7 +234,6 @@ var _title_box: VBoxContainer
 var _best_caption: Label
 var logo: StationLogo
 var pause_screen: Control
-var pause_mute: Button
 var over_screen: Control
 var over_reason: Label
 var over_score: Label
@@ -248,7 +247,6 @@ var _banner_tween: Tween
 var _toast_tween: Tween
 var _ff_lit := false
 var _scaled := []          ## [Label, base font size, base outline] scaled to the screen width.
-var _key_buttons := []     ## [Button, mouse/keyboard text, touch text]
 var _flash: ColorRect
 var _flash_tween: Tween
 
@@ -387,13 +385,6 @@ func _slabel(text: String, size: int, col := Color.WHITE, outline := 8) -> Label
 	var l := _label(text, size, col, outline)
 	_scaled.append([l, size, outline])
 	return l
-
-
-## A button whose caption drops its keyboard hint on touch screens.
-func _kbutton(key_text: String, touch_text: String, cb: Callable) -> Button:
-	var b := _button(key_text, cb)
-	_key_buttons.append([b, key_text, touch_text])
-	return b
 
 
 func _button(text: String, cb: Callable, min_w := 260) -> Button:
@@ -536,10 +527,8 @@ func _build_pause() -> void:
 	vb.add_theme_constant_override("separation", 14)
 	panel.add_child(vb)
 	vb.add_child(_slabel("PAUSED", 64, WATER.lightened(0.3), 14))
-	vb.add_child(_kbutton("RESUME  (P)", "RESUME", func(): game.toggle_pause()))
-	vb.add_child(_kbutton("RESTART  (R)", "RESTART", func(): game.play_again()))
-	pause_mute = _button("SOUND: ON  (M)", func(): game.toggle_mute())
-	vb.add_child(pause_mute)
+	vb.add_child(_button("RESUME", func(): game.toggle_pause()))
+	vb.add_child(_button("RESTART", func(): game.play_again()))
 	vb.add_child(_button("MAIN MENU", func(): game.go_to_title()))
 
 
@@ -656,11 +645,6 @@ func refresh() -> void:
 	_place_stats()
 
 	_refresh_powers()
-	var mt := "SOUND: OFF" if game.sfx.muted else "SOUND: ON"
-	if not game.is_touch:
-		mt += "  (M)"
-	if pause_mute.text != mt:
-		pause_mute.text = mt
 
 	if over_new.visible:
 		over_new.modulate = Color.from_hsv(0.13, 0.6 + 0.4 * sin(game.time * 6.0), 1.0)
@@ -769,15 +753,12 @@ func _refresh_powers() -> void:
 
 func _apply_layout() -> void:
 	var vs: Vector2 = game.view_size
-	var touch: bool = game.is_touch
 	# Text scales down on narrow screens so headings never run off the edge.
 	var k := clampf(minf(vs.x / 680.0, vs.y / 760.0), 0.6, 1.0)
 	for e in _scaled:
 		var l: Label = e[0]
 		l.add_theme_font_size_override("font_size", maxi(12, int(e[1] * k)))
 		l.add_theme_constant_override("outline_size", maxi(2, int(e[2] * k)))
-	for e in _key_buttons:
-		(e[0] as Button).text = e[2] if touch else e[1]
 	# Menu: best score, nameplate, NEW GAME and the small SOLVER must fit.
 	var short := vs.y < 600.0
 	var bh := 56.0 if short else 74.0
