@@ -506,7 +506,7 @@ func _run() -> void:
 	await frames(1)
 	check(not tut.active and not game.tutorial_pending, "SKIP ends the walkthrough")
 
-	# --- AI SOLVE: a bot that plays through taps, at a human pace ---
+	# --- AI SOLVE: a bot that plans routes and plays through taps, at a human pace ---
 	seed(4242)
 	game.rng.seed = 4242
 	game.start_run("medium")
@@ -520,13 +520,49 @@ func _run() -> void:
 	await frames(1)
 	check(game.grid.get_tile(0, 2).hidden, "your taps on the board are ignored while the AI plays")
 	guard = 0
-	while game.state != S.GAMEOVER and game.height < 12 and guard < 60 * 150:
+	var idle := 0
+	var longest_idle := 0
+	var last_taps := 0
+	while game.state != S.GAMEOVER and game.height < 25 and guard < 60 * 200:
 		await frames(1)
 		guard += 1
+		if game.ai.actions == last_taps and not game.ai_hold:
+			idle += 1
+			longest_idle = maxi(longest_idle, idle)
+		else:
+			idle = 0
+		last_taps = game.ai.actions
 	var secs := guard / 60.0
-	check(game.height >= 12, "the AI climbs on its own (row %d after %.0fs, %s)" % [game.height, secs, game.last_reason])
+	check(game.height >= 25, "the AI climbs on its own (row %d after %.0fs, %s)" % [game.height, secs, game.last_reason])
+	check(longest_idle < 60 * 3, "it never stalls (longest pause %.1fs)" % (longest_idle / 60.0))
 	check(game.ai.actions >= 10 and game.flips > 0 and game.drops > 0, "it plays by tapping: %d taps, %d hatches opened, %d pipes moved" % [game.ai.actions, game.flips, game.drops])
 	check(game.ai.actions / maxf(1.0, secs) < 4.0, "at a human pace (%.1f taps a second)" % (game.ai.actions / maxf(1.0, secs)))
+	check(int(game.ai.tally.get("hold", 0)) > 0, "it holds the screen to speed up when its route is ready")
+	# Rebuild: break a pipe on its route ahead of the water and watch it repair it.
+	var broken := Vector2i(-1, -1)
+	for tries in 600:
+		var lp: Dictionary = game.ai.last_plan
+		for cell in lp.get("cells", []):
+			var bt: Tile = game.grid.get_tile(cell["v"].x, cell["v"].y)
+			if cell["need"] < 0 and cell["arrive"] > 5.0 and cell["arrive"] < 9.0 and bt.is_loose() and game.held_piece < 0:
+				broken = cell["v"]
+				break
+		if broken.x >= 0 or game.state == S.GAMEOVER:
+			break
+		await frames(1)
+	if broken.x >= 0:
+		var bt: Tile = game.grid.get_tile(broken.x, broken.y)
+		var was: int = bt.piece
+		bt.set_item(P.NE if was != P.NE else P.SW)  # A pipe that doesn't fit there.
+		game.grid.touch(broken.y)
+		var row_then: int = game.height
+		guard = 0
+		while game.state != S.GAMEOVER and game.height < maxi(row_then, broken.y) + 3 and guard < 60 * 60:
+			await frames(1)
+			guard += 1
+		check(game.state != S.GAMEOVER or game.flow.row > broken.y, "after its route is broken at %s it rebuilds and the water gets past (%s)" % [broken, game.last_reason])
+	else:
+		check(false, "found a pipe on the AI's route to break")
 	if game.state != S.GAMEOVER:
 		click(game.ui.btn_ai.get_global_rect().get_center())
 		await frames(1)

@@ -28,7 +28,7 @@ The pump's pressure gauge counts down to the first surge. After that, the water 
 - **Five zones.** Climb from the Sewer through the Factory, Neon, Magma and out into Space.
 - **Straightforward scoring.** +1 for every tube the water fills and +3 for every row it climbs. There are no multipliers and no bonus pickups, so your score only ever reflects how well you played. Your best score on each difficulty is saved and shown on the main menu.
 - **Learn in a minute.** Your first game starts with a short walkthrough that points at exactly what to tap.
-- **AI SOLVE.** Stuck, or just curious? Tap AI SOLVE and watch a bot play your board the way a person would. It taps hatches open, picks pipes up and drops them into place, and only uses what it can see. Tap it again to take over. Runs the AI helps with don't count toward your best score.
+- **AI SOLVE.** Stuck, or just curious? Tap AI SOLVE and watch a bot solve your board the way a person would, one tap at a time. It opens hatches, plans the best route from the pipes it has found, rebuilds when a route goes wrong, slips narrow pipes in front of the water to buy time, and saves Freeze and Reveal for when they matter. It only uses what it can see. Tap it again to take over. Runs the AI helps with don't count toward your best score.
 - **Made for phones.** One-thumb touch controls and a portrait layout with every control in one bar along the bottom, plus haptics where your phone supports them.
 - **A pump-station look.** Steel plates, rivets, hazard stripes and glowing water, with a subtle PS1-era finish.
 

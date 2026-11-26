@@ -60,7 +60,6 @@ const DEFAULT_DIFFICULTY := "medium" ## Used by Enter on the menu until a button
 const AI_MOVE_SPEED := 900.0         ## Pointer speed in px/s (plus a short settle time per move).
 const AI_THINK_MIN := 0.12           ## Pause between actions, seconds (random in this range).
 const AI_THINK_MAX := 0.32
-const AI_FREEZE_WHEN := 1.6          ## Use Flow-freeze when the water reaches unfinished pipe within this many seconds.
 
 # --- Milestone powers -------------------------------------------------------
 const START_POWERS := 1              ## Flow-freezes and Reveals you start every run with.

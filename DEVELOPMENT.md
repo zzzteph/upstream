@@ -114,29 +114,55 @@ never shows again.
 ## AI SOLVE
 
 The button under the power cards hands the board to `scripts/ai_player.gd`, a
-bot that plays like a person: a visible finger moves to every tap at a human
-pace (`AI_MOVE_SPEED`, `AI_THINK_MIN` / `AI_THINK_MAX`, about two taps a
-second) and every tap goes through `try_place()`, exactly like the player's.
-It only uses what is on screen and never reads a closed hatch or the
-generator's guaranteed path. Each time it decides, it:
+bot that solves the puzzle the way a person would. A visible finger moves to
+every tap at a human pace (`AI_MOVE_SPEED`, `AI_THINK_MIN` / `AI_THINK_MAX`:
+about two taps a second, a little faster when it's in a hurry), and every tap
+goes through `try_place()`, exactly like the player's. It only uses what is on
+screen: it never reads a closed hatch or the generator's guaranteed path.
 
-1. follows the water from where it is through every pipe already connected,
-   to the first cell that isn't (the frontier), and estimates the seconds
-   left before the water gets there;
-2. opens the hatches in the frontier's row, nearest first, and the row above
-   while there's time;
-3. plans the best route through that row and the next (straight up, or along
-   the row and then up), scoring routes by pipes it can't find, swaps needed
-   and length, and steering away from dead ends and rocks;
-4. fetches a matching loose pipe for the first unfinished cell (from rows the
-   water has already passed first) and drops it in: pick, then drop;
-5. uses Flow-freeze when the water is about to reach unfinished pipe
-   (`AI_FREEZE_WHEN`), Reveal when many hatches are still closed and time is
-   short, and holds the screen to speed up when its route is ready.
+**Planning.** Each time it decides, it plans the best route for the water from
+where the water is right now through everything open on screen: a Dijkstra
+search over (cell, side the water comes in from). Pipes that already fit cost
+almost nothing (reservoirs and narrow pipes even less, since they buy time), a
+swap costs more, pieces that are running short cost more still (it checks the
+route's needs against the loose pipes on screen and searches again with
+penalties), and going down costs extra. It then picks where the route should
+stop: off the top of the screen if it can, else at a closed hatch (rated lower
+when the hatch looks like a dead end, boxed in by walls and rocks), else as
+high as possible. For every cell on the route it estimates when the water will
+arrive.
+
+**Rebuilding.** Because it always plans from the water, a route that went
+wrong (a rock behind a hatch, a missing piece, a pipe that got moved) simply
+gets re-planned: pipes that still fit are kept, the rest are swapped out. In
+an emergency it borrows a matching pipe from further along its own route and
+rebuilds that spot afterwards.
+
+**Strategy**, in order of priority:
+
+1. finish a half-done swap (a pipe in hand goes to the first cell it fits);
+2. Flow-freeze when the water would reach unfinished pipe before it could fix
+   it even hurrying (freezes are rare, so only then);
+3. Reveal when the water is moving and there are too many closed hatches to
+   open in time;
+4. look before you leap: open the hatch where the route stops before building
+   towards it, unless a fix near the water can't wait;
+5. fix the most urgent cell, with a narrow pipe if the water is close or fast
+   (it slows the water), taking pipes from rows the water has already passed
+   first; if no pipe fits anywhere on screen, Reveal or open the hatches
+   nearest that cell;
+6. open more hatches when the route is stuck or short of pieces;
+7. fix the rest of the route, nearest the water first;
+8. with the route built off the top of the screen, hold the screen to speed
+   the water up (it lets go as soon as there's work or the water gets close);
+9. in spare time, open hatches ahead so the next plan has more to work with.
 
 The player's taps on the board are ignored while it plays; STOP AI gives the
-board back. A run the AI played any part of doesn't set a best score. In
-headless runs it climbs roughly 30-60 rows on Medium.
+board back. A run the AI played any part of doesn't set a best score.
+
+`tests/ai_bench.gd` plays seeded games and reports how far it gets. Recent
+results (5 games each): Medium rows 83-194 (median 138), Hard rows 62-166
+(median 139); it loses when the water gets faster than human-speed tapping.
 
 ## Rules
 
@@ -187,7 +213,6 @@ Every difficulty knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `START_POWERS` | 1 | Flow-freezes and Reveals at the start of every run |
 | `HOLD_SPEED_MULT` / `HOLD_DELAY` | 4x / 0.3 s | Speed while the screen is held; how long a press must last |
 | `AI_MOVE_SPEED` / `AI_THINK_MIN` / `AI_THINK_MAX` | 900 px/s / 0.12 s / 0.32 s | AI finger speed and pause between taps |
-| `AI_FREEZE_WHEN` | 1.6 s | AI uses Flow-freeze when the water is this close to unfinished pipe |
 | `POWER_AWARD_ROWS` / `FREEZE_TIME` | 100 / 8 s | Rows per extra Flow-freeze + Reveal pair; freeze length |
 | `SCORE_TUBE` / `SCORE_ROW` | 1 / 3 | Points per tube filled / per new row |
 | `SAFE_ROWS` | 5 | Obstacle-free rows at the start |
@@ -252,8 +277,9 @@ the difficulty menu and each difficulty's water speed, the starting powers,
 height and score in the panel, placing, replacing, unlocking and swapping,
 narrow pipes, alarms, pause, the countdown, the +1 / +3 scoring on a cross loop,
 hold to speed up (finger and F), every step of the walkthrough and SKIP, the AI
-SOLVE bot climbing 12 rows by itself at under 4 taps a second (and not setting
-a best score), and a 165-row run through four zones.
+SOLVE bot climbing 25 rows by itself at under 4 taps a second without stalling,
+rebuilding its route after a pipe on it is broken, holding to speed up, and
+not setting a best score, and a 165-row run through four zones.
 
 For testing in a browser, add `?fps` to the URL to log frame rate and draw
 calls to the console, `?autoplay` to let a bot play, and `?powers` to start
