@@ -16,7 +16,6 @@ var rng := RandomNumberGenerator.new()
 var next_entry_col := Tuning.SOURCE_COL
 var spine := {}            ## row -> Vector2i(entry_col, exit_col)
 var spine_needs := {}      ## row -> {col: [entry_side, exit_side]}
-var last_powerup_row := 0
 var next_row := 0
 var unlock_mode := false   ## Fill rows with face-down tiles hiding loose pipes.
 
@@ -26,7 +25,6 @@ func reset(seed_value: int) -> void:
 	next_entry_col = Tuning.SOURCE_COL
 	spine.clear()
 	spine_needs.clear()
-	last_powerup_row = 0
 	next_row = 0
 
 
@@ -197,21 +195,6 @@ func _make_row(r: int) -> Array:
 		elif r >= Tuning.RESERVOIR_START_ROW and rng.randf() < Tuning.RESERVOIR_CHANCE * float(zone["reservoir_mult"]):
 			_make_reservoir(t, P.V if rng.randf() < 0.6 else P.H)
 
-	# 5) Power-ups, on or right next to the path so they're reachable.
-	if r >= Tuning.POWERUP_START_ROW and r - last_powerup_row >= Tuning.POWERUP_MIN_GAP \
-			and rng.randf() < Tuning.POWERUP_CHANCE * float(zone["powerup_mult"]):
-		var lo := maxi(0, mini(a, b) - 1)
-		var hi := mini(Tuning.COLS - 1, maxi(a, b) + 1)
-		var cand := []
-		for c in range(lo, hi + 1):
-			var t: Tile = tiles[c]
-			if t.is_free():
-				cand.append(c)
-		if not cand.is_empty():
-			var t: Tile = tiles[cand[rng.randi_range(0, cand.size() - 1)]]
-			t.powerup = 1 + _weighted(Tuning.POWERUP_WEIGHTS)
-			last_powerup_row = r
-
 	if unlock_mode:
 		_fill_unlock(tiles, need, r)
 	return tiles
@@ -256,6 +239,5 @@ func _fill_unlock(tiles: Array, need: Dictionary, r: int) -> void:
 			t.piece = _weighted(Tuning.PIECE_WEIGHTS)
 			# Some spare pipes are narrow: they work the same but the goo crawls.
 			t.narrow = t.piece != P.CROSS and r >= Tuning.NARROW_START_ROW and rng.randf() < Tuning.NARROW_CHANCE
-		elif r >= Tuning.ALARM_START_ROW and not t.spine and t.powerup == Tile.PU_NONE \
-				and rng.randf() < Tuning.ALARM_CHANCE:
+		elif r >= Tuning.ALARM_START_ROW and not t.spine and rng.randf() < Tuning.ALARM_CHANCE:
 			t.alarm = true

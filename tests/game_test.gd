@@ -104,11 +104,11 @@ func _run() -> void:
 	check(t31.get_item() == next, "click places the next queued piece")
 	check(game.queue[0] == second and game.queue.size() == Tuning.QUEUE_SIZE, "queue advances and refills")
 
-	# --- replacing costs a lock and points ---
+	# --- replacing costs a short lock (and no points) ---
 	game.score = 500
 	click(tile_center(3, 1))
 	await frames(1)
-	check(game.score == 500 - Tuning.REPLACE_PENALTY, "replace costs %d points" % Tuning.REPLACE_PENALTY)
+	check(game.score == 500, "replacing costs no points")
 	check(game.lock_timer > 0.9, "replace locks the queue")
 	var before: int = game.grid.get_tile(4, 1).piece
 	click(tile_center(4, 1))
@@ -124,14 +124,7 @@ func _run() -> void:
 	var top_row := int(game.cam.y + game.cam.visible_rows) + 2
 	check(game.try_place(2, top_row) == "no", "tiles above the screen are not placeable")
 
-	# --- wildcard, pause, mute ---
-	game.wildcards = 1
-	await frames(1)
-	check(game.ui.picker.visible, "wildcard picker appears")
-	key(KEY_7)
-	await frames(1)
-	check(game.queue[0] == P.CROSS and game.wildcards == 0, "wildcard sets the next piece")
-	check(not game.ui.picker.visible or game.wildcards == 0, "picker closes")
+	# --- pause, mute ---
 	key(KEY_P)
 	await frames(1)
 	check(game.paused and game.ui.pause_screen.visible, "P pauses")
@@ -163,7 +156,7 @@ func _run() -> void:
 	await frames(int(Tuning.COUNTDOWN_TIME * 60) + 5)
 	check(game.state == S.RUNNING and game.flow.active, "goo starts after the countdown")
 
-	# --- the cross loop in the safe rows: both passes score ---
+	# --- the cross loop in the safe rows: +1 per tube (both cross passes), +3 per row ---
 	game.start_run()
 	await frames(1)
 	for spec in [[3, 1, P.V], [3, 2, P.CROSS], [3, 3, P.SE], [4, 3, P.SW], [4, 2, P.NW], [2, 2, P.NE], [2, 3, P.V], [2, 4, P.V]]:
@@ -171,7 +164,6 @@ func _run() -> void:
 	var above: Tile = game.grid.get_tile(2, 5)  # Make sure the loop ends on an empty tile.
 	above.kind = Tile.EMPTY
 	above.clear_pipe()
-	above.powerup = Tile.PU_NONE
 	key(KEY_F)
 	await frames(1)
 	check(game.state == S.RUNNING and game.fast_forward, "F during countdown starts the flow in fast-forward")
@@ -181,9 +173,10 @@ func _run() -> void:
 		waited += 1
 	var cross: Tile = game.grid.get_tile(3, 2)
 	check(cross.fill[0] == 1.0 and cross.fill[1] == 1.0, "cross filled both ways in game")
-	check(game.crosses == 1, "cross double-pass counted once")
-	var want := int((9 * Tuning.SCORE_SEGMENT + Tuning.SCORE_CROSS_DOUBLE) * Tuning.FAST_FORWARD_SCORE_MULT)
-	check(game.score == want, "loop score %d (got %d)" % [want, game.score])
+	check(game.height == 4, "the loop climbs to row 4 (got %d)" % game.height)
+	var want: int = 9 * Tuning.SCORE_TUBE + 4 * Tuning.SCORE_ROW
+	check(Tuning.SCORE_TUBE == 1 and Tuning.SCORE_ROW == 3, "scoring is +1 per tube and +3 per row")
+	check(game.score == want, "loop score: 9 tubes x1 + 4 rows x3 = %d, fast-forward adds nothing (got %d)" % [want, game.score])
 	check(game.last_reason == "empty", "spills on the empty tile (got %s)" % game.last_reason)
 	await frames(100)
 	check(game.state == S.GAMEOVER and game.ui.over_screen.visible, "game over screen shows")
@@ -208,11 +201,12 @@ func _run() -> void:
 		zones_seen[game.zone_index] = true
 	check(game.height >= target, "perfect play climbs to row %d (reached %d, %s)" % [target, game.height, game.last_reason])
 	check(zones_seen.size() >= 4, "passed through 4 zones (%d)" % zones_seen.size())
-	check(game.multiplier() >= 1.0 + Tuning.MULT_STEP * 6, "multiplier grows with height (x%.1f)" % game.multiplier())
+	check(game.score >= game.height * Tuning.SCORE_ROW + game.height and game.score <= game.height * (Tuning.SCORE_ROW + 4),
+			"score is rows x3 plus tubes x1, with no multiplier (height %d, score %d)" % [game.height, game.score])
 	check(game.height_speed() > 2.5, "flow speeds up with height (%.2fx)" % game.height_speed())
 	check(peak_rows <= Tuning.KEEP_ROWS_BELOW + 40, "rows in memory stay bounded (peak %d)" % peak_rows)
 	check(game.grid.floor_row > 100, "old rows discarded (floor at %d)" % game.grid.floor_row)
-	print("long run: height %d, score %d, crosses %d, wildcards %d" % [game.height, game.score, game.crosses, game.wildcards])
+	print("long run: height %d, score %d" % [game.height, game.score])
 
 	# Stop laying pipe: the run must end on its own.
 	guard = 0
@@ -337,8 +331,8 @@ func _run() -> void:
 	game.start_run()
 	await frames(1)
 	check(game.difficulty == "hard", "playing again keeps the difficulty")
-	check(SaveData._keys("medium") == [SaveData.KEY, "best"] and SaveData._keys("hard") != SaveData._keys("medium"),
-			"each difficulty keeps its own best score (medium keeps the old record)")
+	check(SaveData._keys("hard") != SaveData._keys("medium") and SaveData._keys("easy") != SaveData._keys("medium")
+			and not "upstream_best" in SaveData._keys("medium"), "each difficulty keeps its own best score, on new keys")
 	SaveData.save_best(SaveData.load_best("hard") + 1, "hard")
 	check(SaveData.load_best("hard") > 0, "a hard best score saves and loads")
 	game.ui.show_game_over("", 10, 1, 20, false, "hard")

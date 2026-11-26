@@ -5,12 +5,10 @@ class_name GameUI
 extends CanvasLayer
 
 
-## A button that draws its own icon (pause, sound, fast-forward, pipe piece).
+## A button that draws its own icon (the Flow-freeze and Reveal powers).
 class IconButton:
 	extends Button
 	var kind := ""
-	var piece := -1
-	var pal: Dictionary = {}
 	var lit := false
 	var caption := ""
 
@@ -48,8 +46,6 @@ class IconButton:
 				draw_circle(cc, rh * 0.8, ec)
 				draw_circle(cc, rh * 0.38, Color("11181d"))
 				_caption(ec)
-			"piece":
-				pass  # Drawn by the IconArt child from the sprite atlas.
 
 
 	func _caption(col: Color) -> void:
@@ -57,20 +53,6 @@ class IconButton:
 			return
 		var fs := int(clampf(minf(size.x, size.y) * 0.2, 12, 20))
 		draw_string(PipeArt.font(), Vector2(0, size.y - fs * 0.6), caption, HORIZONTAL_ALIGNMENT_CENTER, size.x, fs, col)
-
-
-## A pipe icon from the sprite atlas (premultiplied alpha, hence its own material).
-class IconArt:
-	extends Control
-	var atlas: SpriteAtlas
-	var piece := 0
-	var zone := 0
-
-	func _draw() -> void:
-		if atlas == null or atlas.icon_px <= 0:
-			return
-		var s := minf(size.x, size.y) * 0.78
-		draw_texture_rect_region(atlas.icon_tex(zone), Rect2((size - Vector2(s, s)) * 0.5, Vector2(s, s)), atlas.icon_region(piece))
 
 
 var game  ## The Game node (main.gd).
@@ -96,17 +78,13 @@ var over_score: Label
 var over_height: Label
 var over_best: Label
 var over_new: Label
-var picker: PanelContainer
-var picker_buttons: Array = []
 var _last_view := Vector2.ZERO
 var _last_portrait := false
 var _banner_tween: Tween
 var _toast_tween: Tween
 var _ff_lit := false
-var _picker_zone := -1
 var _scaled := []          ## [Label, base font size, base outline] scaled to the screen width.
 var _key_buttons := []     ## [Button, mouse/keyboard text, touch text]
-var _picker_label: Label
 var _flash: ColorRect
 var _flash_tween: Tween
 
@@ -120,7 +98,6 @@ func _ready() -> void:
 	add_child(root)
 	_build_hud()
 	_build_center_labels()
-	_build_picker()
 	_build_title()
 	_build_pause()
 	_build_over()
@@ -306,35 +283,6 @@ func _build_center_labels() -> void:
 	root.add_child(toast)
 
 
-func _build_picker() -> void:
-	picker = PanelContainer.new()
-	picker.visible = false
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 6)
-	picker.add_child(vb)
-	_picker_label = _slabel("WILDCARD! Pick your next piece (1-7)", 20, Color("e8b0ff"), 6)
-	vb.add_child(_picker_label)
-	var hb := HBoxContainer.new()
-	hb.add_theme_constant_override("separation", 6)
-	hb.alignment = BoxContainer.ALIGNMENT_CENTER
-	vb.add_child(hb)
-	for p in Pieces.COUNT:
-		var piece := p
-		var b := _icon_button("piece", func(): game.choose_wildcard(piece))
-		b.piece = p
-		b.custom_minimum_size = Vector2(62, 62)
-		var art := IconArt.new()
-		art.atlas = game.atlas
-		art.piece = p
-		art.material = game.atlas.premult_material
-		art.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		art.set_anchors_preset(Control.PRESET_FULL_RECT)
-		b.add_child(art)
-		hb.add_child(b)
-		picker_buttons.append(art)
-	root.add_child(picker)
-
-
 func _build_title() -> void:
 	title_screen = _overlay()
 	# The main screen gets its own background instead of the dimmed board.
@@ -506,25 +454,6 @@ func refresh() -> void:
 	if over_new.visible:
 		over_new.modulate = Color.from_hsv(0.13, 0.6 + 0.4 * sin(game.time * 6.0), 1.0)
 
-	# Wildcard picker.
-	var want_picker: bool = game.wildcards > 0 and (game.state == game.State.RUNNING or game.state == game.State.COUNTDOWN) and not game.paused
-	if picker.visible != want_picker:
-		picker.visible = want_picker
-		_picker_zone = -1
-	if want_picker:
-		var pz: int = game.zone_index * 100000 + game.atlas.icon_px
-		if _picker_zone != pz:
-			_picker_zone = pz
-			for art in picker_buttons:
-				art.zone = game.zone_index
-				art.queue_redraw()
-			picker.reset_size()
-		var ps := picker.get_combined_minimum_size()
-		var b: Rect2 = game.board_rect
-		var pp := Vector2(roundf((vs.x - ps.x) * 0.5), roundf(b.end.y - ps.y - 16.0))
-		if picker.position != pp:
-			picker.position = pp
-
 
 ## Height and score inside game.stats_rect, each a small caption over a big
 ## number: stacked in the side panel, side by side in the portrait bottom bar.
@@ -593,16 +522,8 @@ func _apply_layout() -> void:
 		l.add_theme_constant_override("outline_size", maxi(2, int(e[2] * k)))
 	for e in _key_buttons:
 		(e[0] as Button).text = e[2] if touch else e[1]
-	var unlock: bool = game.mode == "unlock"
 	logo.fit_width(vs.x - 24.0)
 	over_reason.custom_minimum_size = Vector2(minf(420.0, vs.x - 96.0), 0)
-	var what := "Pick any piece to place" if unlock else "Pick your next piece"
-	_picker_label.text = "WILDCARD! " + what + ("" if touch else " (1-7)")
-	var pb := clampf((vs.x - 110.0) / 7.0, 40.0, 62.0)
-	for art in picker_buttons:
-		(art.get_parent() as Control).custom_minimum_size = Vector2(pb, pb)
-	picker.reset_size()
-	_picker_zone = -1
 	_stats_key = ""
 	# Difficulty buttons: one row that always fits the screen width.
 	var bw := clampf((vs.x - 48.0 - 28.0) / 3.0, 120.0, 210.0)

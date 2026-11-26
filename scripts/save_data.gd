@@ -1,19 +1,19 @@
 ## High score storage: localStorage in the browser, a config file elsewhere.
-## One best score per difficulty. Medium keeps the original key, so scores
-## saved before difficulties existed count as Medium.
+## One best score per difficulty. The keys are new with the +1 per tube /
+## +3 per row scoring, so records from the old, bonus-based scoring (stored
+## under "upstream_best") don't carry over.
 ## Every access is guarded, so a blocked or broken store never crashes the game.
 class_name SaveData
 extends RefCounted
 
-const KEY := "upstream_best"
+const KEY := "upstream_score"
 const PATH := "user://upstream.cfg"
 
 
 ## localStorage key and config-file key for a difficulty.
 static func _keys(difficulty: String) -> Array:
-	if difficulty == "" or difficulty == "medium":
-		return [KEY, "best"]
-	return ["%s_%s" % [KEY, difficulty], "best_%s" % difficulty]
+	var d := difficulty if difficulty != "" else "medium"
+	return ["%s_%s" % [KEY, d], "score_%s" % d]
 
 
 static func load_best(difficulty := "medium") -> int:

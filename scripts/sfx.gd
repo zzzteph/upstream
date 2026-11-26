@@ -109,14 +109,6 @@ func _build_all() -> void:
 	_tone(b, 0.0, 0.045, 1500.0, 1050.0, "sine", 0.28, 0.001, 3.0)
 	streams["tick"] = _to_stream(b)
 
-	var notes: Array
-	b = _buffer(0.5)
-	notes = [523.0, 659.0, 784.0, 1047.0]
-	for i in notes.size():
-		_tone(b, i * 0.07, 0.2, notes[i], notes[i], "tri", 0.34, 0.003, 1.4)
-		_tone(b, i * 0.07, 0.2, notes[i] * 2.0, notes[i] * 2.0, "sine", 0.12, 0.003, 2.0)
-	streams["cross"] = _to_stream(b)
-
 	b = _buffer(0.42)
 	_tone(b, 0.0, 0.4, 300.0, 1500.0, "sine", 0.4, 0.01, 1.0)
 	_tone(b, 0.05, 0.35, 600.0, 2400.0, "tri", 0.15, 0.01, 1.5)
@@ -138,7 +130,7 @@ func _build_all() -> void:
 	streams["go"] = _to_stream(b)
 
 	b = _buffer(0.8)
-	notes = [392.0, 523.0, 659.0, 784.0]
+	var notes: Array = [392.0, 523.0, 659.0, 784.0]
 	for i in notes.size():
 		_tone(b, i * 0.1, 0.4 if i == 3 else 0.16, notes[i], notes[i], "tri", 0.34, 0.004, 1.3)
 		_tone(b, i * 0.1, 0.4 if i == 3 else 0.16, notes[i] * 1.5, notes[i] * 1.5, "sine", 0.1, 0.004, 1.5)

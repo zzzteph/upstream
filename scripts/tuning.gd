@@ -27,9 +27,6 @@ const BASE_SEGMENT_TIME := 2.6       ## Seconds to fill one tile at speed 1.0x.
 const SPEEDUP_PER_ROW := 0.012       ## Speed gained per row climbed (+1.2% per row).
 const MAX_SPEED := 3.5               ## Cap on the height-based speed factor.
 const FAST_FORWARD_MULT := 5.0       ## Fast-forward flow multiplier.
-const FAST_FORWARD_SCORE_MULT := 2.0 ## Points multiplier while fast-forwarding.
-const SLOWMO_MULT := 0.5             ## Flow multiplier while slow-mo is active.
-const SLOWMO_DURATION := 8.0         ## Seconds of slow-mo per pickup.
 const RESERVOIR_FILL_FACTOR := 4.0   ## Reservoir tiles take this many times longer to fill.
 const NARROW_FILL_FACTOR := 2.5      ## Narrow pipes take this many times longer to fill.
 const NARROW_CHANCE := 0.16          ## Chance a pipe (hidden or in the queue) is narrow.
@@ -38,7 +35,6 @@ const NARROW_START_ROW := 3          ## Narrow pipes turn up from this row (unlo
 # --- Placement --------------------------------------------------------------
 const QUEUE_SIZE := 5                ## Pieces shown in the queue.
 const REPLACE_LOCK_TIME := 1.0       ## Seconds the queue is locked after a replace.
-const REPLACE_PENALTY := 50          ## Points lost per replace.
 ## Queue weights, indexed by piece id: H, V, SE(┌), SW(┐), NE(└), NW(┘), CROSS.
 const PIECE_WEIGHTS := [16, 16, 14, 14, 14, 14, 5]
 
@@ -50,7 +46,6 @@ const ALARM_START_ROW := 15          ## Alarm traps appear from this row.
 const ALARM_CHANCE := 0.07           ## Chance per hidden empty slot to be an alarm.
 const ALARM_SURGE_TIME := 4.0        ## Seconds the goo surges after an alarm.
 const ALARM_SURGE_MULT := 1.8        ## Flow multiplier during a surge.
-const ALARM_PENALTY := 100           ## Points lost per alarm.
 const FLIP_TIME := 0.3               ## Seconds of the unlock flip animation.
 
 # --- Difficulty -------------------------------------------------------------
@@ -65,10 +60,9 @@ const POWER_AWARD_ROWS := 100        ## Every this many rows: +1 Flow-freeze and
 const FREEZE_TIME := 8.0             ## Seconds the flow stays frozen.
 
 # --- Scoring ----------------------------------------------------------------
-const SCORE_SEGMENT := 10            ## Points per filled segment.
-const SCORE_CROSS_DOUBLE := 100      ## Points when a cross is filled both ways.
-const MULT_ROWS_STEP := 25           ## Rows per multiplier step.
-const MULT_STEP := 0.5               ## Multiplier gained per step.
+## Points only for progress: no multipliers, bonuses or penalties.
+const SCORE_TUBE := 1                ## Per tube the water fills (a cross filled both ways counts twice).
+const SCORE_ROW := 3                 ## Per new row the water reaches.
 
 # --- Camera / memory --------------------------------------------------------
 const CAMERA_LEAD_FRACTION := 0.33   ## Goo head is kept this far up from the bottom.
@@ -89,11 +83,6 @@ const ONEWAY_ON_PATH_CHANCE := 0.09  ## Chance per row that the safe path gets a
 const RESERVOIR_START_ROW := 55      ## Reservoirs appear from this row.
 const RESERVOIR_CHANCE := 0.012      ## Chance per free off-path tile.
 const RESERVOIR_ON_PATH_CHANCE := 0.06 ## Chance per row that the safe path gets a reservoir.
-const POWERUP_START_ROW := 8         ## Power-ups appear from this row.
-const POWERUP_CHANCE := 0.12         ## Chance per row (after the minimum gap).
-const POWERUP_MIN_GAP := 6           ## Minimum rows between power-ups.
-## Power-up weights: slow-mo, wildcard.
-const POWERUP_WEIGHTS := [55, 45]
 ## How far the guaranteed path drifts sideways per row: weights for 0, 1, 2, 3 columns.
 const SPINE_SHIFT_WEIGHTS := [40, 38, 16, 6]
 

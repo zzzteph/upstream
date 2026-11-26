@@ -54,8 +54,5 @@ func _on_key(key: int, echo: bool) -> bool:
 		KEY_SPACE, KEY_ENTER, KEY_KP_ENTER:
 			game.on_confirm()
 		_:
-			if key >= KEY_1 and key <= KEY_7:
-				game.choose_wildcard(key - KEY_1)
-			else:
-				return false
+			return false
 	return true

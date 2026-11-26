@@ -1,4 +1,4 @@
-## One board cell: its terrain, optional pipe, pickups and goo fill state.
+## One board cell: its terrain, optional pipe and goo fill state.
 class_name Tile
 extends RefCounted
 
@@ -12,18 +12,12 @@ const SP_NONE := 0
 const SP_ONEWAY := 1
 const SP_RESERVOIR := 2
 
-# Power-ups
-const PU_NONE := 0
-const PU_SLOW := 1
-const PU_WILD := 2
-
 var kind := EMPTY
 var piece := -1                ## Pieces.* or -1.
 var narrow := false            ## A narrow pipe: the goo crawls through it.
 var fixed := false             ## Pre-placed by the generator; the player can't replace it.
 var special := SP_NONE
 var oneway_entry := -1         ## For one-way pipes: the only side goo may enter.
-var powerup := PU_NONE
 var fill := [0.0, 0.0]         ## Fill progress per channel (cross: 0 = horizontal, 1 = vertical).
 var fill_entry := [-1, -1]     ## Side the goo entered each channel through (-1 = dry).
 var fill_color := [Color.WHITE, Color.WHITE]

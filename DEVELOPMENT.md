@@ -56,9 +56,10 @@ resolution. The board takes about 130 draw calls, and game scripts take about
 
 The main menu has three buttons, EASY, MEDIUM and HARD. They multiply the
 water's speed by 0.5, 1 and 1.25 (`DIFFICULTY_SPEED` in `scripts/tuning.gd`) on
-top of the height-based speed-up. Each difficulty keeps its own best score;
-Medium uses the original save key, so older records count as Medium. Play
-again, restart and Enter on the menu reuse the last difficulty.
+top of the height-based speed-up. Each difficulty keeps its own best score
+(`upstream_score_<difficulty>`; scores from the old bonus-based scoring, saved
+as `upstream_best`, are not carried over). Play again, restart and Enter on the
+menu reuse the last difficulty.
 
 The game plays in unlock mode; set `DEFAULT_MODE` in `scripts/tuning.gd` to
 `"classic"` for the piece-queue game.
@@ -69,7 +70,7 @@ The game plays in unlock mode; set `DEFAULT_MODE` in `scripts/tuning.gd` to
   marks), a rock, or an alarm trap. Click a pipe to pick it up,
   then click an open spot or another pipe to swap them (click it again to put
   it back). Water that reaches a closed block spills, so open blocks ahead of it. An
-  alarm costs 100 points and makes the water surge for a few seconds.
+  alarm makes the water surge for a few seconds.
 - **Classic**: the board is open and you place pieces from a queue of five.
 
 **Powers:** every run starts with one **Flow-freeze** and one **Reveal**
@@ -90,9 +91,8 @@ onto the water's path to buy time.
 | Open a block (unlock mode) | Click / tap it | Arrows or WASD to move the cursor, Space / Enter to click |
 | Pick up a pipe, then swap it (unlock mode) | Click / tap the pipe, then the spot | Same |
 | Place the next piece (classic mode) | Click / tap an empty tile | Same |
-| Replace a dry pipe (classic, -50 points, 1 s lock) | Click / tap it | Same |
-| Fast-forward (x5 flow, x2 points, until game over) | (keyboard only) | F |
-| Pick a wildcard piece | Picker buttons | 1-7 |
+| Replace a dry pipe (classic, 1 s lock) | Click / tap it | Same |
+| Fast-forward (x5 flow, until game over) | (keyboard only) | F |
 | Flow-freeze / Reveal (after row 100) | Snowflake / eye buttons | Q / E |
 | Pause | (pauses by itself when you switch apps) | P / Esc |
 | Mute | In the pause menu | M |
@@ -107,14 +107,15 @@ onto the water's path to buy time.
 - The run ends when water reaches an open pipe end, a wall, a rock, an empty tile,
   a pipe that is already full, or a one-way pipe from the wrong side.
 - Pieces: straight horizontal and vertical, four corners and a cross. A cross can
-  be filled twice, once each way, for +100.
-- Scoring: +10 per filled segment, +100 for a cross filled both ways, and every
-  25 rows add +0.5x to the multiplier. Fast-forward doubles all points.
+  be filled twice, once each way.
+- Scoring: +1 per tube the water fills (a cross filled both ways is two tubes)
+  and +3 per new row. Nothing else: no multipliers, no bonuses, no penalties,
+  and fast-forward doesn't change the points.
 - Obstacles grow with height: rocks, one-way pipes (brass, with arrows) and
   reservoirs (fixed pipes that swell into a wide chamber and take 4x as long to
   fill, which buys you time).
-- Power-ups (picked up when water passes): **Slow-mo** (half speed for 8 s) and
-  **Wildcard** (choose any piece).
+- There are no bonus pickups on the board. The only things that help are the
+  slow tubes (narrow pipes and reservoirs) and the Flow-freeze / Reveal powers.
 - Every 50 rows the zone changes: Sewer > Factory > Neon > Magma > Space, then
   the cycle repeats.
 - The level is always solvable: each row carries a guaranteed path that only
@@ -131,30 +132,26 @@ Every difficulty knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `BASE_SEGMENT_TIME` | 2.6 s | Time to fill one tile at 1.0x |
 | `SPEEDUP_PER_ROW` | 0.012 | Speed gained per row climbed |
 | `MAX_SPEED` | 3.5x | Cap on height-based speed |
-| `FAST_FORWARD_MULT` / `FAST_FORWARD_SCORE_MULT` | 5x / 2x | Fast-forward flow and points |
-| `SLOWMO_MULT` / `SLOWMO_DURATION` | 0.5x / 8 s | Slow-mo power-up |
+| `FAST_FORWARD_MULT` | 5x | Fast-forward flow speed |
 | `RESERVOIR_FILL_FACTOR` | 4 | How much slower reservoirs fill |
-| `REPLACE_LOCK_TIME` / `REPLACE_PENALTY` | 1 s / 50 | Cost of replacing a pipe |
+| `REPLACE_LOCK_TIME` | 1 s | Queue lock after replacing a pipe (classic) |
 | `PIECE_WEIGHTS` | 16,16,14,14,14,14,5 | Piece odds (crosses rarest) |
 | `DEFAULT_MODE` | "unlock" | Game mode ("unlock" or "classic") |
 | `UNLOCK_PIECE_FILL` | 0.72 | Chance a closed block hides a pipe (else an open spot) |
 | `UNLOCK_SPINE_PIECE_CHANCE` | 0.5 | Chance a path tile already hides the pipe it needs |
 | `ALARM_START_ROW` / `ALARM_CHANCE` | 15 / 0.07 | Alarm traps |
-| `ALARM_SURGE_TIME` / `ALARM_SURGE_MULT` / `ALARM_PENALTY` | 4 s / 1.8x / 100 | Alarm cost |
+| `ALARM_SURGE_TIME` / `ALARM_SURGE_MULT` | 4 s / 1.8x | Alarm surge |
 | `FLIP_TIME` | 0.3 s | Unlock flip animation |
 | `DIFFICULTY_SPEED` | easy 0.5, medium 1.0, hard 1.25 | Water speed multiplier per menu difficulty |
 | `DEFAULT_DIFFICULTY` | "medium" | Difficulty for Enter on the menu before a button is picked |
 | `START_POWERS` | 1 | Flow-freezes and Reveals at the start of every run |
 | `POWER_AWARD_ROWS` / `FREEZE_TIME` | 100 / 8 s | Rows per extra Flow-freeze + Reveal pair; freeze length |
-| `SCORE_SEGMENT` / `SCORE_CROSS_DOUBLE` | 10 / 100 | Points |
-| `MULT_ROWS_STEP` / `MULT_STEP` | 25 rows / +0.5x | Height multiplier |
+| `SCORE_TUBE` / `SCORE_ROW` | 1 / 3 | Points per tube filled / per new row |
 | `SAFE_ROWS` | 5 | Obstacle-free rows at the start |
 | `ROCK_BASE` / `ROCK_PER_ROW` / `ROCK_MAX` | 0.10 / 0.0025 / 0.40 | Rock density and growth |
 | `MAX_ROCKS_PER_ROW` | 4 | Hard cap per row |
 | `ONEWAY_START_ROW` / `ONEWAY_CHANCE` / `ONEWAY_ON_PATH_CHANCE` | 35 / 0.035 / 0.09 | One-way pipes |
 | `RESERVOIR_START_ROW` / `RESERVOIR_CHANCE` / `RESERVOIR_ON_PATH_CHANCE` | 55 / 0.012 / 0.06 | Reservoirs |
-| `POWERUP_START_ROW` / `POWERUP_CHANCE` / `POWERUP_MIN_GAP` | 8 / 0.12 / 6 | Power-up frequency |
-| `POWERUP_WEIGHTS` | 55,45 | Slow-mo, wildcard odds |
 | `NARROW_FILL_FACTOR` / `NARROW_CHANCE` / `NARROW_START_ROW` | 2.5 / 0.16 / 3 | Narrow pipes: slowdown, how often, from which row |
 | `SPINE_SHIFT_WEIGHTS` | 40,38,16,6 | How far the guaranteed path drifts sideways per row |
 | `ZONE_ROWS` | 50 | Rows per zone |
@@ -208,7 +205,7 @@ every way the water can be stopped, and generates 250 seeds x 420 rows to prove
 each one solvable. `game_test.gd` drives the real scene with input events:
 the difficulty menu and each difficulty's water speed, the starting powers,
 height and score in the panel, placing, replacing, unlocking and swapping,
-narrow pipes, alarms, wildcards, pause, the countdown, a cross scored in game,
+narrow pipes, alarms, pause, the countdown, the +1 / +3 scoring on a cross loop,
 and a 165-row run through four zones.
 
 For testing in a browser, add `?fps` to the URL to log frame rate and draw

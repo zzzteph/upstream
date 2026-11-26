@@ -275,7 +275,7 @@ func test_generator_solvable() -> void:
 	var bad_run := 0
 	var seen_oneway := 0
 	var seen_res := 0
-	var seen_pu := 0
+	var no_pickups := true
 	for s in seeds:
 		var g := Grid.new()
 		var gen := LevelGenerator.new()
@@ -307,8 +307,7 @@ func test_generator_solvable() -> void:
 					seen_oneway += 1
 				if t.special == Tile.SP_RESERVOIR:
 					seen_res += 1
-				if t.powerup != Tile.PU_NONE:
-					seen_pu += 1
+				no_pickups = no_pickups and not "powerup" in t
 			if open < Tuning.COLS - Tuning.MAX_ROCKS_PER_ROW:
 				bad_rows += 1
 		if not bfs_reaches_top(g, rows):
@@ -334,8 +333,9 @@ func test_generator_solvable() -> void:
 	check(bad_rows == 0, "no row is sealed by rocks (%d bad rows)" % bad_rows)
 	check(bad_bfs == 0, "BFS finds a way to the top on every seed (%d failed)" % bad_bfs)
 	check(bad_run == 0, "goo laid along the spine reaches row %d on every seed (%d failed)" % [rows, bad_run])
-	check(seen_oneway > 0 and seen_res > 0 and seen_pu > 0, "all obstacle kinds appear")
-	print("generator: %d seeds x %d rows, one-way %d, reservoirs %d, power-ups %d" % [seeds, rows, seen_oneway, seen_res, seen_pu])
+	check(seen_oneway > 0 and seen_res > 0, "all obstacle kinds appear")
+	check(no_pickups, "no bonus pickups on the board (tiles have no power-up field)")
+	print("generator: %d seeds x %d rows, one-way %d, reservoirs %d" % [seeds, rows, seen_oneway, seen_res])
 
 
 ## Can goo get from the source to `top_row` if the player fills free tiles freely?

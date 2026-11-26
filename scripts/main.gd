@@ -43,8 +43,6 @@ var best := 0               ## Best score on the current difficulty.
 var height := 0            ## Highest row the goo has reached.
 var countdown := 0.0
 var fast_forward := false
-var slow_timer := 0.0
-var wildcards := 0
 var lock_timer := 0.0
 var queue_shift := 0.0     ## 1 -> 0 slide animation after a placement.
 var time := 0.0
@@ -52,11 +50,10 @@ var zone_index := 0
 var spill := {}
 var spill_timer := 0.0
 var new_best := false
-var crosses := 0
 var last_reason := ""
 var _beeped := 0
 # Unlock mode
-var held_from := Vector2i(-1, -1)  ## Tile whose pipe is picked up ((-1,-1) = from a wildcard).
+var held_from := Vector2i(-1, -1)  ## Tile whose pipe is picked up.
 var held_piece := -1               ## Pipe item in hand (see Pieces.item), -1 = empty hand.
 var surge_timer := 0.0             ## Alarm surge time left.
 # Milestone powers (earned every POWER_AWARD_ROWS rows)
@@ -76,7 +73,6 @@ var T := 64.0
 var px_scale := 1.0        ## Physical pixels per virtual pixel (window stretch).
 var board_rect := Rect2()
 var queue_rect := Rect2()
-var status_rect := Rect2()
 var stats_rect := Rect2()    ## Height and score, inside the panel.
 var freeze_rect := Rect2()   ## Milestone power buttons (shown while playing).
 var reveal_rect := Rect2()
@@ -175,15 +171,12 @@ func new_board(seed_value: int) -> void:
 	score = 0
 	height = 0
 	fast_forward = false
-	slow_timer = 0.0
-	wildcards = 0
 	lock_timer = 0.0
 	queue_shift = 0.0
 	zone_index = 0
 	spill = {}
 	spill_timer = 0.0
 	new_best = false
-	crosses = 0
 	last_reason = ""
 	countdown = Tuning.COUNTDOWN_TIME
 	_beeped = 0
@@ -291,7 +284,6 @@ func _update_play(dt: float) -> void:
 		if countdown <= 0.0:
 			_start_flow()
 		return
-	slow_timer = maxf(0.0, slow_timer - dt)
 	surge_timer = maxf(0.0, surge_timer - dt)
 	if freeze_timer > 0.0:
 		freeze_timer -= dt
@@ -330,10 +322,6 @@ func _ensure_rows() -> void:
 
 # --- rules & scoring ---------------------------------------------------------------------
 
-func multiplier() -> float:
-	return 1.0 + Tuning.MULT_STEP * floorf(height / float(Tuning.MULT_ROWS_STEP))
-
-
 func height_speed() -> float:
 	return minf(Tuning.MAX_SPEED, 1.0 + height * Tuning.SPEEDUP_PER_ROW)
 
@@ -342,8 +330,6 @@ func effective_speed() -> float:
 	var s := height_speed() * float(Tuning.DIFFICULTY_SPEED.get(difficulty, 1.0))
 	if fast_forward:
 		s *= Tuning.FAST_FORWARD_MULT
-	if slow_timer > 0.0:
-		s *= Tuning.SLOWMO_MULT
 	if surge_timer > 0.0:
 		s *= Tuning.ALARM_SURGE_MULT
 	if freeze_timer > 0.0:
@@ -351,10 +337,11 @@ func effective_speed() -> float:
 	return s
 
 
-func add_points(base: float) -> int:
-	var pts := int(round(base * multiplier() * (Tuning.FAST_FORWARD_SCORE_MULT if fast_forward else 1.0)))
-	score += pts
-	return pts
+## The score is simple: +SCORE_TUBE for every tube the water fills (a cross
+## filled both ways is two tubes) and +SCORE_ROW for every new row it reaches.
+## No multipliers or bonuses.
+func add_points(n: int) -> void:
+	score += n
 
 
 func _goo_color() -> Color:
@@ -376,28 +363,20 @@ func _handle_event(e: Dictionary) -> void:
 			var wp := Vector2(e["col"] + 0.5, e["row"] + 0.5)
 			if t.narrow:
 				renderer.float_text(wp, "SLOW", Color("e8c020"), 0.28, 0.8)
-			if t.powerup != Tile.PU_NONE:
-				_apply_powerup(t.powerup, wp)
-				t.powerup = Tile.PU_NONE
 		"filled":
 			var t: Tile = e["tile"]
 			if t.kind == Tile.SOURCE:
 				return
-			add_points(Tuning.SCORE_SEGMENT)
+			add_points(Tuning.SCORE_TUBE)
 			sfx.play("tick", 0.92 + randf() * 0.16 + minf(0.5, height * 0.004), -5.0)
-			if t.piece == Pieces.CROSS and t.fill[0] >= 1.0 and t.fill[1] >= 1.0:
-				var pts := add_points(Tuning.SCORE_CROSS_DOUBLE)
-				crosses += 1
-				var wp := Vector2(e["col"] + 0.5, e["row"] + 0.5)
-				renderer.burst(wp, Color("ffffff"), 30, 4.5, 0.08, 1.0)
-				renderer.float_text(wp, "CROSS! +%d" % pts, Color("8af0ff"), 0.4, 1.3)
-				sfx.play("cross")
 		"blocked":
 			_game_over(e)
 
 
-## New best height: zone banners, and the milestone powers every 100 rows.
+## New best height: +SCORE_ROW per new row, and the milestone powers every 100 rows.
 func _set_height(r: int) -> void:
+	if r > height:
+		add_points((r - height) * Tuning.SCORE_ROW)
 	height = r
 	while height >= _next_award_row:
 		freezes += 1
@@ -457,21 +436,6 @@ func use_reveal() -> bool:
 	return true
 
 
-func _apply_powerup(kind: int, wp: Vector2) -> void:
-	var col := PipeArt.powerup_color(kind)
-	match kind:
-		Tile.PU_SLOW:
-			slow_timer += Tuning.SLOWMO_DURATION
-			ui.show_toast("SLOW-MO!  Half speed for %ds" % int(Tuning.SLOWMO_DURATION), col)
-			renderer.float_text(wp, "SLOW-MO", col)
-		Tile.PU_WILD:
-			wildcards += 1
-			ui.show_toast("WILDCARD!  Choose any piece", col)
-			renderer.float_text(wp, "WILDCARD", col)
-	renderer.burst(wp, col, 32, 4.5, 0.08, 1.0)
-	sfx.play("powerup")
-
-
 func _game_over(e: Dictionary) -> void:
 	state = State.SPILL
 	spill_timer = 1.5
@@ -485,7 +449,6 @@ func _game_over(e: Dictionary) -> void:
 	buzz(250)
 	renderer.burst(p, col, 44, 5.0, 0.09, 1.2, 8.0)
 	fast_forward = false
-	slow_timer = 0.0
 	surge_timer = 0.0
 	freeze_timer = 0.0
 	_clear_hand()
@@ -541,10 +504,8 @@ func try_place(c: int, r: int) -> String:
 			queue_shift = 1.0
 			t.placed_at = time
 			if action == "replace":
-				score = maxi(0, score - Tuning.REPLACE_PENALTY)
 				lock_timer = Tuning.REPLACE_LOCK_TIME
 				sfx.play("replace")
-				renderer.float_text(wp, "-%d" % Tuning.REPLACE_PENALTY, Color("ff8a5a"), 0.3, 0.9)
 				renderer.burst(wp, Color(0.8, 0.8, 0.8), 10, 2.5, 0.06, 0.5, 3.0, false)
 			else:
 				sfx.play("place", 0.95 + randf() * 0.1)
@@ -625,11 +586,10 @@ func _unlock_click(c: int, r: int) -> String:
 func _trigger_alarm(wp: Vector2) -> void:
 	alarms += 1
 	surge_timer = Tuning.ALARM_SURGE_TIME
-	score = maxi(0, score - Tuning.ALARM_PENALTY)
 	cam.add_shake(0.45)
 	sfx.play("alarm")
 	renderer.burst(wp, Color("ff3a2a"), 30, 4.0, 0.08, 0.9)
-	renderer.float_text(wp, "ALARM! -%d" % Tuning.ALARM_PENALTY, Color("ff5a4a"), 0.36, 1.3)
+	renderer.float_text(wp, "ALARM!", Color("ff5a4a"), 0.36, 1.3)
 	ui.show_toast("ALARM!  The water surges", Color("ff5a4a"))
 	buzz(120)
 	ui.flash(Color(1.0, 0.1, 0.05, 0.35))
@@ -727,24 +687,7 @@ func activate_fast_forward() -> void:
 	if state == State.COUNTDOWN:
 		_start_flow()
 	sfx.play("ff")
-	ui.show_toast("FAST-FORWARD!  x2 POINTS", Color("ffd23a"))
-
-
-func choose_wildcard(piece: int) -> void:
-	if wildcards <= 0 or piece < 0 or piece >= Pieces.COUNT:
-		return
-	if (state != State.COUNTDOWN and state != State.RUNNING) or paused:
-		return
-	wildcards -= 1
-	sfx.play("powerup", 1.4)
-	if mode == "unlock":
-		held_from = Vector2i(-1, -1)
-		held_piece = piece
-		ui.show_toast("%s a spot to place your %s" % ["Tap" if is_touch else "Click", Pieces.NAMES[piece]], Color("e8b0ff"))
-		return
-	queue[0] = piece
-	queue_shift = 0.0
-	ui.show_toast("Next piece: %s" % Pieces.NAMES[piece], Color("e8b0ff"))
+	ui.show_toast("FAST-FORWARD!", Color("ffd23a"))
 
 
 # --- layout -----------------------------------------------------------------------------------
@@ -812,7 +755,7 @@ func _compute_layout() -> void:
 	var unlock := mode == "unlock"
 	if portrait:
 		# Board on top, a control bar along the bottom:
-		# [hand / queue] [height + score, pickups underneath] [freeze] [reveal]
+		# [hand / queue] [height + score] [freeze] [reveal]
 		var bottom_h := clampf(view_size.y * 0.14, 120.0, 170.0)
 		var avail_w := view_size.x - 40.0
 		var avail_h := view_size.y - bottom_h
@@ -837,12 +780,10 @@ func _compute_layout() -> void:
 				_slots.append(Rect2(x + (i % 2) * (s1 + 6.0), y + (i / 2) * (s1 + 6.0), s1, s1))
 			x += s0 + 12.0
 		var mid_w := maxf(0.0, freeze_rect.position.x - 10.0 - x)
-		var mid_h := queue_rect.size.y - 16.0
-		stats_rect = Rect2(x, queue_rect.position.y + 8.0, mid_w, mid_h * 0.62)
-		status_rect = Rect2(x, stats_rect.end.y, mid_w, mid_h * 0.38)
+		stats_rect = Rect2(x, queue_rect.position.y + 10.0, mid_w, queue_rect.size.y - 20.0)
 	else:
 		# Board on the left, a panel on the right:
-		# HAND (or the queue), height + score, pickups, then the power buttons.
+		# HAND (or the queue), height + score, then the power buttons.
 		var panel_w := clampf(view_size.x * 0.17, 150.0, 220.0)
 		var avail_w := view_size.x - panel_w - 80.0
 		T = _tile_size(minf(avail_w / Tuning.COLS, view_size.y / min_rows))
@@ -860,8 +801,7 @@ func _compute_layout() -> void:
 		freeze_rect = Rect2(queue_rect.position.x + 12.0, bottom - ph, half, ph)
 		reveal_rect = Rect2(freeze_rect.end.x + 8.0, freeze_rect.position.y, half, ph)
 		var stats_h := 136.0 if tall else 100.0
-		var chips_h := 44.0
-		var slots_bottom := freeze_rect.position.y - 10.0 - chips_h - stats_h - 16.0
+		var slots_bottom := freeze_rect.position.y - 10.0 - stats_h - 16.0
 		if unlock:
 			var s0 := minf(minf(panel_w - 40.0, 150.0), slots_bottom - y)
 			_slots.append(Rect2(cx - s0 * 0.5, y, s0, s0))
@@ -890,8 +830,6 @@ func _compute_layout() -> void:
 				x += s1 + gap
 			y += s1 + 16.0
 		stats_rect = Rect2(queue_rect.position.x + 10.0, y, panel_w - 20.0, stats_h)
-		y = stats_rect.end.y + 8.0
-		status_rect = Rect2(queue_rect.position.x + 10.0, y, panel_w - 20.0, maxf(30.0, freeze_rect.position.y - y - 8.0))
 	cam.visible_rows = board_rect.size.y / T
 	if atlas != null:
 		atlas.ensure(roundi(T * px_scale), roundi((_slots[0] as Rect2).size.x * 0.86 * px_scale))
