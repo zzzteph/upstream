@@ -14,7 +14,7 @@ const REASONS := {
 	"wall": "The water hit the wall.",
 	"oneway": "The water hit a one-way pipe from the wrong side.",
 	"clogged": "The water ran into a pipe that was already full.",
-	"locked": "The water hit a closed block. Open the blocks ahead of it.",
+	"locked": "",  # Plain enough on screen; no message.
 }
 
 var state := State.TITLE
@@ -37,8 +37,9 @@ var ui: GameUI
 var sfx: Sfx
 
 # Run state
+var difficulty: String = Tuning.DEFAULT_DIFFICULTY  ## "easy", "medium" or "hard": scales the water speed.
 var score := 0
-var best := 0
+var best := 0               ## Best score on the current difficulty.
 var height := 0            ## Highest row the goo has reached.
 var countdown := 0.0
 var fast_forward := false
@@ -70,13 +71,14 @@ var alarms := 0
 # Layout, in virtual pixels (720 on the short side).
 var view_size := Vector2(720, 720)
 var portrait := false
-var hud_h := 66.0
+var hud_h := 0.0           ## Height of a top bar (none: the stats live in the side panel).
 var T := 64.0
 var px_scale := 1.0        ## Physical pixels per virtual pixel (window stretch).
 var board_rect := Rect2()
 var queue_rect := Rect2()
 var status_rect := Rect2()
-var freeze_rect := Rect2()   ## Milestone power buttons (shown when you have charges).
+var stats_rect := Rect2()    ## Height and score, inside the panel.
+var freeze_rect := Rect2()   ## Milestone power buttons (shown while playing).
 var reveal_rect := Rect2()
 var _slots: Array = []
 
@@ -114,7 +116,7 @@ func _ready() -> void:
 	ui = GameUI.new()
 	ui.game = self
 	add_child(ui)
-	best = SaveData.load_best()
+	best = SaveData.load_best(difficulty)
 	_read_debug_flags()
 	_compute_layout()
 	new_board(rng.randi())
@@ -159,8 +161,8 @@ func new_board(seed_value: int) -> void:
 	gen.unlock_mode = mode == "unlock"
 	_clear_hand()
 	surge_timer = 0.0
-	freezes = 0
-	reveals = 0
+	freezes = Tuning.START_POWERS
+	reveals = Tuning.START_POWERS
 	freeze_timer = 0.0
 	freeze_started = -100.0
 	_next_award_row = Tuning.POWER_AWARD_ROWS
@@ -195,7 +197,11 @@ func new_board(seed_value: int) -> void:
 	kb_active = false
 
 
-func start_run() -> void:
+## Start a run. `diff` picks the difficulty ("easy", "medium", "hard"); empty keeps the last one.
+func start_run(diff := "") -> void:
+	if diff != "" and Tuning.DIFFICULTY_SPEED.has(diff):
+		difficulty = diff
+	best = SaveData.load_best(difficulty)
 	new_board(rng.randi())
 	if debug_powers:
 		freezes = 3
@@ -309,7 +315,7 @@ func _update_spill(dt: float) -> void:
 		renderer.burst(spill["p"], spill["col"], 2, 2.2, 0.06, 0.8, 9.0)
 	if spill_timer <= 0.0:
 		state = State.GAMEOVER
-		ui.show_game_over(REASONS.get(last_reason, "The water spilled."), score, height, best, new_best)
+		ui.show_game_over(REASONS.get(last_reason, "The water spilled."), score, height, best, new_best, difficulty)
 
 
 func _ensure_rows() -> void:
@@ -333,7 +339,7 @@ func height_speed() -> float:
 
 
 func effective_speed() -> float:
-	var s := height_speed()
+	var s := height_speed() * float(Tuning.DIFFICULTY_SPEED.get(difficulty, 1.0))
 	if fast_forward:
 		s *= Tuning.FAST_FORWARD_MULT
 	if slow_timer > 0.0:
@@ -486,7 +492,7 @@ func _game_over(e: Dictionary) -> void:
 	if score > best:
 		best = score
 		new_best = true
-		SaveData.save_best(best)
+		SaveData.save_best(best, difficulty)
 
 
 # --- placement ------------------------------------------------------------------------------
@@ -743,8 +749,9 @@ func choose_wildcard(piece: int) -> void:
 
 # --- layout -----------------------------------------------------------------------------------
 
+## The power buttons stay on screen for the whole run (dimmed when empty).
 func powers_shown() -> bool:
-	return (state == State.COUNTDOWN or state == State.RUNNING) and (freezes > 0 or reveals > 0 or freeze_timer > 0.0)
+	return state == State.COUNTDOWN or state == State.RUNNING
 
 
 ## 0..1 strength of the freeze effect: frosts in fast, thaws over the last second.
@@ -799,57 +806,69 @@ func _compute_layout() -> void:
 	is_touch = DisplayServer.is_touchscreen_available()
 	var min_rows := Tuning.MIN_VISIBLE_ROWS if view_size.y >= 600.0 else Tuning.MIN_VISIBLE_ROWS_COMPACT
 	portrait = view_size.x < view_size.y * 0.9
-	hud_h = _px(56.0)
+	hud_h = 0.0  # No top bar: height and score sit in the side panel.
 	_slots = []
 	var n := Tuning.QUEUE_SIZE
+	var unlock := mode == "unlock"
 	if portrait:
-		var bottom_h := clampf(view_size.y * 0.12, 110.0, 150.0)
+		# Board on top, a control bar along the bottom:
+		# [hand / queue] [height + score, pickups underneath] [freeze] [reveal]
+		var bottom_h := clampf(view_size.y * 0.14, 120.0, 170.0)
 		var avail_w := view_size.x - 40.0
-		var avail_h := view_size.y - hud_h - bottom_h
+		var avail_h := view_size.y - bottom_h
 		T = _tile_size(minf(avail_w / Tuning.COLS, avail_h / min_rows))
 		var bw := T * Tuning.COLS
-		board_rect = Rect2(_px((view_size.x - bw) * 0.5), hud_h, bw, _px(view_size.y - bottom_h) - hud_h)
+		board_rect = Rect2(_px((view_size.x - bw) * 0.5), 0.0, bw, _px(view_size.y - bottom_h))
 		queue_rect = Rect2(8.0, board_rect.end.y + 6.0, view_size.x - 16.0, bottom_h - 14.0)
 		var s0 := queue_rect.size.y - 34.0
-		var s1 := s0 * 0.72
 		# Power buttons: big thumb targets at the right end of the bar.
 		var bar_h := queue_rect.size.y - 24.0
-		var pw := bar_h * 0.95
-		reveal_rect = Rect2(queue_rect.end.x - 14.0 - pw, queue_rect.position.y + 12.0, pw, bar_h)
+		var pw := bar_h * 0.7
+		reveal_rect = Rect2(queue_rect.end.x - 12.0 - pw, queue_rect.position.y + 12.0, pw, bar_h)
 		freeze_rect = Rect2(reveal_rect.position.x - 8.0 - pw, reveal_rect.position.y, pw, bar_h)
 		var x := queue_rect.position.x + 14.0
 		var y := queue_rect.position.y + 24.0
 		_slots.append(Rect2(x, y, s0, s0))
 		x += s0 + 12.0
-		for i in n - 1:
-			_slots.append(Rect2(x, y + s0 - s1, s1, s1))
-			x += s1 + 8.0
-		status_rect = Rect2(x + 4.0, queue_rect.position.y + 8.0, maxf(0.0, queue_rect.end.x - 14.0 - x - 4.0), queue_rect.size.y - 16.0)
-		if powers_shown():
-			var s0r: Rect2 = _slots[0]
-			status_rect = Rect2(s0r.end.x + 10.0, queue_rect.position.y + 8.0, maxf(0.0, freeze_rect.position.x - s0r.end.x - 20.0), queue_rect.size.y - 16.0)
+		if not unlock:
+			# Classic: the next pieces in a 2 x 2 block beside the first one.
+			var s1 := (s0 - 6.0) * 0.5
+			for i in n - 1:
+				_slots.append(Rect2(x + (i % 2) * (s1 + 6.0), y + (i / 2) * (s1 + 6.0), s1, s1))
+			x += s0 + 12.0
+		var mid_w := maxf(0.0, freeze_rect.position.x - 10.0 - x)
+		var mid_h := queue_rect.size.y - 16.0
+		stats_rect = Rect2(x, queue_rect.position.y + 8.0, mid_w, mid_h * 0.62)
+		status_rect = Rect2(x, stats_rect.end.y, mid_w, mid_h * 0.38)
 	else:
+		# Board on the left, a panel on the right:
+		# HAND (or the queue), height + score, pickups, then the power buttons.
 		var panel_w := clampf(view_size.x * 0.17, 150.0, 220.0)
 		var avail_w := view_size.x - panel_w - 80.0
-		var avail_h := view_size.y - hud_h
-		T = _tile_size(minf(avail_w / Tuning.COLS, avail_h / min_rows))
+		T = _tile_size(minf(avail_w / Tuning.COLS, view_size.y / min_rows))
 		var bw := T * Tuning.COLS
 		var total := bw + 30.0 + panel_w
 		var x0 := _px((view_size.x - total) * 0.5)
-		board_rect = Rect2(x0, hud_h, bw, _px(view_size.y) - hud_h)
-		queue_rect = Rect2(board_rect.end.x + 30.0, hud_h + 12.0, panel_w, view_size.y - hud_h - 24.0)
+		board_rect = Rect2(x0, 0.0, bw, _px(view_size.y))
+		queue_rect = Rect2(board_rect.end.x + 30.0, 12.0, panel_w, view_size.y - 24.0)
+		var tall := view_size.y >= 600.0
 		var cx := queue_rect.get_center().x
 		var y := queue_rect.position.y + 40.0
-		# Power buttons: a row along the bottom of the panel.
-		var ph := 64.0 if view_size.y >= 600.0 else 50.0
+		var ph := 64.0 if tall else 50.0
 		var half := (panel_w - 24.0 - 8.0) * 0.5
 		var bottom := queue_rect.end.y - 12.0
 		freeze_rect = Rect2(queue_rect.position.x + 12.0, bottom - ph, half, ph)
 		reveal_rect = Rect2(freeze_rect.end.x + 8.0, freeze_rect.position.y, half, ph)
-		var slots_bottom := freeze_rect.position.y - 10.0
-		if view_size.y >= 600.0:
-			# Tall screen: the next piece on top, the rest stacked below it.
-			var avail := slots_bottom - queue_rect.position.y - 40.0 - 70.0 - (n - 1) * 10.0 - 14.0
+		var stats_h := 136.0 if tall else 100.0
+		var chips_h := 44.0
+		var slots_bottom := freeze_rect.position.y - 10.0 - chips_h - stats_h - 16.0
+		if unlock:
+			var s0 := minf(minf(panel_w - 40.0, 150.0), slots_bottom - y)
+			_slots.append(Rect2(cx - s0 * 0.5, y, s0, s0))
+			y += s0 + 16.0
+		elif tall:
+			# The next piece on top, the rest stacked below it.
+			var avail := slots_bottom - y - (n - 1) * 10.0 - 14.0
 			var s0 := minf(panel_w - 40.0, avail / (1.0 + (n - 1) * 0.58))
 			var s1 := s0 * 0.58
 			_slots.append(Rect2(cx - s0 * 0.5, y, s0, s0))
@@ -857,20 +876,22 @@ func _compute_layout() -> void:
 			for i in n - 1:
 				_slots.append(Rect2(cx - s1 * 0.5, y, s1, s1))
 				y += s1 + 10.0
+			y += 6.0
 		else:
 			# Short screen (phone held sideways): the next piece, then one row of the rest.
 			var gap := 6.0
 			var s1 := (panel_w - 24.0 - gap * (n - 2)) / (n - 1)
-			var s0 := minf(panel_w - 40.0, slots_bottom - y - s1 - 14.0 - 44.0)
+			var s0 := minf(panel_w - 40.0, slots_bottom - y - s1 - 10.0)
 			_slots.append(Rect2(cx - s0 * 0.5, y, s0, s0))
 			y += s0 + 10.0
 			var x := queue_rect.position.x + 12.0
 			for i in n - 1:
 				_slots.append(Rect2(x, y, s1, s1))
 				x += s1 + gap
-			y += s1 + 4.0
-		var status_end := freeze_rect.position.y if powers_shown() else bottom
-		status_rect = Rect2(queue_rect.position.x + 10.0, y, panel_w - 20.0, maxf(30.0, status_end - y - 8.0))
+			y += s1 + 16.0
+		stats_rect = Rect2(queue_rect.position.x + 10.0, y, panel_w - 20.0, stats_h)
+		y = stats_rect.end.y + 8.0
+		status_rect = Rect2(queue_rect.position.x + 10.0, y, panel_w - 20.0, maxf(30.0, freeze_rect.position.y - y - 8.0))
 	cam.visible_rows = board_rect.size.y / T
 	if atlas != null:
 		atlas.ensure(roundi(T * px_scale), roundi((_slots[0] as Rect2).size.x * 0.86 * px_scale))

@@ -9,9 +9,11 @@ assets: all art and sound are generated in code).
 The board has a light PlayStation 1 flavour: it renders at 480 lines (the PS1's
 hi-res mode) with 15-bit colour and a subtle ordered dither, then scales up
 smoothly.
-The menu and HUD use an industrial pump-station look (steel plates, rivets,
-hazard stripes, a pressure gauge on the nameplate) and stay sharp so they read
-well on phones.
+The menu and the side panel use an industrial pump-station look (steel plates,
+rivets, hazard stripes, a pressure gauge on the nameplate) and stay sharp so
+they read well on phones. There is no top bar: height and score sit in the side
+panel under the hand (in the bottom bar, between the hand and the power
+buttons, in portrait), so the board gets the full height of the screen.
 
 ## Deployment
 
@@ -38,7 +40,7 @@ One-time setup: in the repository's **Settings > Pages**, set **Source** to
   and open http://localhost:8000. A Godot web build can't be opened straight
   from disk with `file://`.
 - **Phones and tablets:** the same web build works with touch. The layout
-  switches to portrait (queue under the board) or a compact sideways layout,
+  switches to portrait (controls in a bar under the board) or a compact sideways layout,
   and text and buttons scale to the screen.
 
 ## Frame rate
@@ -50,23 +52,31 @@ cached and only redrawn when they change, and the board renders at low
 resolution. The board takes about 130 draw calls, and game scripts take about
 2 ms per frame in the browser even on a slow test machine.
 
-## Modes
+## Difficulty and modes
 
-The main menu has one button, NEW GAME. The game plays in unlock mode; set
-`DEFAULT_MODE` in `scripts/tuning.gd` to `"classic"` for the piece-queue game.
+The main menu has three buttons, EASY, MEDIUM and HARD. They multiply the
+water's speed by 0.5, 1 and 1.25 (`DIFFICULTY_SPEED` in `scripts/tuning.gd`) on
+top of the height-based speed-up. Each difficulty keeps its own best score;
+Medium uses the original save key, so older records count as Medium. Play
+again, restart and Enter on the menu reuse the last difficulty.
+
+The game plays in unlock mode; set `DEFAULT_MODE` in `scripts/tuning.gd` to
+`"classic"` for the piece-queue game.
 
 - **Unlock** (like BioShock's hacking): every tile starts as a closed steel
-  block. Click or tap a block to flip it open and see what's under it: a
-  pipe, an open spot, a rock, or an alarm trap. Click a pipe to pick it up,
+  hatch (light, raised, tread plate). Click or tap one to flip it open and see
+  what's under it: a pipe, an empty slot (a dark recessed socket with corner
+  marks), a rock, or an alarm trap. Click a pipe to pick it up,
   then click an open spot or another pipe to swap them (click it again to put
   it back). Water that reaches a closed block spills, so open blocks ahead of it. An
   alarm costs 100 points and makes the water surge for a few seconds.
 - **Classic**: the board is open and you place pieces from a queue of five.
 
-**Milestone powers:** every 100 rows you get one **Flow-freeze** and one
-**Reveal**. Flow-freeze stops the water for 8 seconds while every pipe frosts
-over. Reveal opens every block on the current map in one wave and disarms the
-alarms. Their buttons appear in the panel once you have charges (Q and E on a
+**Powers:** every run starts with one **Flow-freeze** and one **Reveal**
+(`START_POWERS`), on every difficulty, and every 100 rows adds another of each.
+Flow-freeze stops the water for 8 seconds while every pipe frosts over. Reveal
+opens every block on the current map in one wave and disarms the alarms. Their
+buttons stay in the panel for the whole run and dim when empty (Q and E on a
 keyboard).
 
 **Narrow pipes** (thinner steel tubes with a ring in the middle) connect like
@@ -91,7 +101,7 @@ onto the water's path to buy time.
 ## Rules
 
 - Water starts after a 10-second countdown, shown on the pump's pressure gauge,
-  and speeds up as it climbs. The HUD shows just your height and score.
+  and speeds up as it climbs. The panel shows just your height and score.
 - In unlock mode every row hides at least the pipes its guaranteed path needs,
   so unlocking a row and swapping pipes within it is always enough.
 - The run ends when water reaches an open pipe end, a wall, a rock, an empty tile,
@@ -132,7 +142,10 @@ Every difficulty knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `ALARM_START_ROW` / `ALARM_CHANCE` | 15 / 0.07 | Alarm traps |
 | `ALARM_SURGE_TIME` / `ALARM_SURGE_MULT` / `ALARM_PENALTY` | 4 s / 1.8x / 100 | Alarm cost |
 | `FLIP_TIME` | 0.3 s | Unlock flip animation |
-| `POWER_AWARD_ROWS` / `FREEZE_TIME` | 100 / 8 s | Rows per Flow-freeze + Reveal pair; freeze length |
+| `DIFFICULTY_SPEED` | easy 0.5, medium 1.0, hard 1.25 | Water speed multiplier per menu difficulty |
+| `DEFAULT_DIFFICULTY` | "medium" | Difficulty for Enter on the menu before a button is picked |
+| `START_POWERS` | 1 | Flow-freezes and Reveals at the start of every run |
+| `POWER_AWARD_ROWS` / `FREEZE_TIME` | 100 / 8 s | Rows per extra Flow-freeze + Reveal pair; freeze length |
 | `SCORE_SEGMENT` / `SCORE_CROSS_DOUBLE` | 10 / 100 | Points |
 | `MULT_ROWS_STEP` / `MULT_STEP` | 25 rows / +0.5x | Height multiplier |
 | `SAFE_ROWS` | 5 | Obstacle-free rows at the start |
@@ -174,11 +187,11 @@ Each zone also scales the obstacle mix (`rock_mult`, `oneway_mult`, ...) in
 | `board_renderer.gd` | Backdrop, cached board rows, live water tile, particles, queue |
 | `ps1_screen.gdshader` | 15-bit colour and ordered dither for the low-res board |
 | `input_handler.gd` | Mouse, touch and keyboard |
-| `ui.gd` | HUD, banners, title / pause / game-over screens |
+| `ui.gd` | Height and score in the panel, power buttons, banners, title / pause / game-over screens |
 | `title_backdrop.gd` | The menu's background: pump-station wall and flowing pipes |
 | `station_logo.gd` | The UPSTREAM nameplate: steel plate, gauge, stencil letters |
 | `sfx.gd` | Synthesised sound effects |
-| `save_data.gd` | High score (localStorage on the web, a config file elsewhere) |
+| `save_data.gd` | Best score per difficulty (localStorage on the web, a config file elsewhere) |
 
 ## Tests
 
@@ -193,8 +206,10 @@ godot --headless --fixed-fps 60 --script res://tests/game_test.gd
 `run_tests.gd` checks every piece from every entry side, the cross both ways,
 every way the water can be stopped, and generates 250 seeds x 420 rows to prove
 each one solvable. `game_test.gd` drives the real scene with input events:
-the NEW GAME menu, placing, replacing, unlocking and swapping, narrow pipes, alarms, wildcards, pause, the countdown, a cross scored in
-game, and a 165-row run through four zones.
+the difficulty menu and each difficulty's water speed, the starting powers,
+height and score in the panel, placing, replacing, unlocking and swapping,
+narrow pipes, alarms, wildcards, pause, the countdown, a cross scored in game,
+and a 165-row run through four zones.
 
 For testing in a browser, add `?fps` to the URL to log frame rate and draw
 calls to the console, `?autoplay` to let a bot play, and `?powers` to start

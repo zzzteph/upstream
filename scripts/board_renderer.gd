@@ -680,9 +680,10 @@ func _deco(pal: Dictionary, alpha: float) -> void:
 
 func _queue_signature() -> String:
 	# Includes whether each animation is running, so the frame after it ends is redrawn too.
-	return "%s|%d|%s|%d|%d|%s|%d|%d|%s|%s|%d|%s|%d|%s" % [str(game.queue), game.zone_index, game.portrait,
+	return "%s|%d|%s|%d|%d|%s|%d|%d|%s|%s|%d|%s|%d|%s|%s" % [str(game.queue), game.zone_index, game.portrait,
 			ceili(game.slow_timer), game.state, game.queue_rect, atlas.icon_px, atlas.tile_px,
-			game.queue_shift > 0.0, game.lock_timer > 0.0, game.wildcards, game.mode, game.held_piece, game.is_touch]
+			game.queue_shift > 0.0, game.lock_timer > 0.0, game.wildcards, game.mode, game.held_piece,
+			game.stats_rect, game.status_rect]
 
 
 func _draw_queue_bg(ci: CanvasItem) -> void:
@@ -718,45 +719,45 @@ func _draw_queue_bg(ci: CanvasItem) -> void:
 		_text(ci, f, Vector2(s0.get_center().x, s0.position.y - 10), title, 20, Color(1, 1, 1, 0.8))
 	else:
 		_text(ci, f, Vector2(s0.get_center().x, s0.position.y - 4), title, 15, Color(1, 1, 1, 0.8))
-	if unlock and slots.size() > 1 and not (game.portrait and game.powers_shown()):
-		var hint := _hint_rect(slots)
-		var verb := "Tap" if game.is_touch else "Click"
-		var msg := ""
-		if game.held_piece >= 0:
-			msg = "%s an open spot or another pipe to swap them. %s it again to put it back." % [verb, verb]
-		else:
-			msg = "%s a block to open it. %s a pipe, then a spot, to move it." % [verb, verb]
-		var fsz := int(clampf(hint.size.y * 0.2, 13.0, 17.0)) if game.portrait else 16
-		ci.draw_multiline_string_outline(f, hint.position + Vector2(0, fsz), msg, HORIZONTAL_ALIGNMENT_LEFT, hint.size.x, fsz, -1, 4, Color(0, 0, 0, 0.8))
-		ci.draw_multiline_string(f, hint.position + Vector2(0, fsz), msg, HORIZONTAL_ALIGNMENT_LEFT, hint.size.x, fsz, -1, Color(0.85, 0.95, 1.0, 0.9))
+	# A recessed plate behind the height and score (the labels are UI nodes on top).
+	var st: Rect2 = game.stats_rect
+	if st.size.x > 20.0:
+		_sb.bg_color = Color(0, 0, 0, 0.28)
+		_sb.set_corner_radius_all(10)
+		_sb.set_border_width_all(0)
+		ci.draw_style_box(_sb, st.grow(2.0))
 	for chip in _chips():
 		_text(ci, f, chip["text_pos"], chip["text"], chip["size"], Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT)
 
 
-## Unlock mode: where the how-to text goes (the space of the queue's small slots).
-func _hint_rect(slots: Array) -> Rect2:
-	var q: Rect2 = game.queue_rect
-	var box := (slots[1] as Rect2).merge(slots[slots.size() - 1])
-	if game.portrait:
-		return Rect2(box.position.x, q.position.y + 8.0, q.end.x - 14.0 - box.position.x, q.size.y - 16.0)
-	return Rect2(q.position.x + 12.0, box.position.y, q.size.x - 24.0, box.size.y)
-
-
+## Active pickups (slow-mo time left, wildcards held): an icon and a short text
+## each, in a row when they fit, otherwise stacked.
 func _chips() -> Array:
 	var st: Rect2 = game.status_rect
-	var icon := minf(st.size.y * 0.42, 22.0)
-	var x := st.position.x
-	var y := st.get_center().y
-	var out := []
 	var items := []
 	if game.slow_timer > 0.0:
 		items.append([Tile.PU_SLOW, "%ds" % ceili(game.slow_timer)])
 	if game.wildcards > 0:
-		items.append([Tile.PU_WILD, "PICK"])
+		items.append([Tile.PU_WILD, "x%d" % game.wildcards])
+	var out := []
+	if items.is_empty() or st.size.x < 30.0 or st.size.y < 16.0:
+		return out
+	var icon := minf(22.0, st.size.y * 0.42)
+	var chip_w := icon * 3.9
+	var stacked := chip_w * items.size() > st.size.x
+	if stacked:
+		icon = minf(icon, st.size.y / (items.size() * 2.3))
+		chip_w = icon * 3.9
+	var x := st.position.x
+	var y := st.position.y + (minf(st.size.y * 0.5, icon * 1.5) if not stacked else icon * 1.15)
 	for it in items:
+		var fs := maxi(12, int(icon * 0.95))
 		out.append({"kind": it[0], "center": Vector2(x + icon, y), "radius": icon * 0.8,
-				"text": it[1], "text_pos": Vector2(x + icon * 2.0 + 18, y + icon * 0.35), "size": int(icon * 0.9)})
-		x += icon * 4.0
+				"text": it[1], "text_pos": Vector2(x + icon * 2.0 + 22.0, y + fs * 0.36), "size": fs})
+		if stacked:
+			y += icon * 2.3
+		else:
+			x += chip_w + 8.0
 	return out
 
 

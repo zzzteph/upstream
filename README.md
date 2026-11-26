@@ -12,32 +12,33 @@ Free, no download, no account. Works on desktop and on phones.
 
 Deep under the city, an old pump station has woken up, and the water only goes one way: **up**.
 
-Upstream is an endless pipe-hacking puzzle. Every tile in the shaft starts as a sealed steel block. Crack the blocks open to see what's behind them, then swap the pipes around to build a route before the water gets there. If it reaches a dead end, a rock or a block you haven't opened, the station floods and your run is over.
+Upstream is an endless pipe-hacking puzzle. Every tile in the shaft starts as a sealed steel hatch. Crack the hatches open to see what's behind them, then swap the pipes around to build a route before the water gets there. If it reaches a dead end, a rock or a hatch you haven't opened, the station floods and your run is over.
 
 The pump's pressure gauge counts down to the first surge. After that, the water never stops, and it speeds up the higher it climbs. How far up can you keep it going?
 
 ## Features
 
 - **Endless vertical climb.** The shaft is generated as you rise, and every row is guaranteed to have a way through. If you spill, it's on you.
-- **Crack it open, then plan.** Tap a block to flip it. Behind it you might find a pipe, an open slot, a rock or an alarm trap. Tap a pipe, then tap where it should go.
+- **Three difficulties.** **Easy** runs the water at half speed, **Medium** is the standard pace and **Hard** is 25% faster. Each keeps its own best score.
+- **Crack it open, then plan.** Tap a hatch to flip it. Behind it you might find a pipe, an empty slot, a rock or an alarm trap. Tap a pipe, then tap where it should go. Closed hatches are light, raised steel, and empty slots are dark sockets, so you can always tell them apart.
 - **Buy yourself time.** Narrow pipes and reservoirs slow the water down, so drag them onto its path when things get tight. Slow-mo and Wildcard pickups also ride along the route.
-- **Milestone powers.** Every 100 rows you earn one **Flow-freeze**, which locks every pipe in ice and stops the water cold, and one **Reveal**, which flips every block on the map open in one wave.
+- **Emergency powers.** Every run starts with one **Flow-freeze**, which locks every pipe in ice and stops the water cold, and one **Reveal**, which flips every hatch on the map open in one wave. You earn another of each every 100 rows.
 - **A shaft that fights back.** As you climb, you'll meet more rocks, one-way valves and alarms that make the water surge.
 - **Five zones.** Climb from the Sewer through the Factory, Neon, Magma and out into Space.
-- **Score chasing.** Every filled segment counts. Fill a cross pipe in both directions for a big bonus, and climb higher to raise your multiplier. Your best score is saved.
-- **Made for phones.** One-thumb touch controls and a portrait layout, with haptics where your phone supports them.
+- **Score chasing.** Every filled segment counts. Fill a cross pipe in both directions for a big bonus, and climb higher to raise your multiplier. Your best score on each difficulty is saved.
+- **Made for phones.** One-thumb touch controls and a portrait layout with every control in one bar along the bottom, plus haptics where your phone supports them.
 - **A pump-station look.** Steel plates, rivets, hazard stripes and glowing water, with a subtle PS1-era finish.
 
-![Main menu](media/menu.png)
+<p align="center"><img src="media/phone.png" width="320" alt="Upstream on a phone"></p>
 
 ## How to play
 
-1. Press **NEW GAME**. The gauge on the pump counts down to the first surge.
-2. **Tap a block** in the water's way to open it.
-3. **Tap a pipe**, then **tap an open slot or another pipe** to move or swap it. Tap the pipe again to put it back.
+1. Pick **EASY**, **MEDIUM** or **HARD**. The gauge on the pump counts down to the first surge.
+2. **Tap a hatch** in the water's way to open it.
+3. **Tap a pipe**, then **tap an empty slot or another pipe** to move or swap it. Tap the pipe again to put it back.
 4. Build a connected route upward and stay ahead of the water.
 
-Pickups count when the water flows through them. Your Flow-freeze and Reveal buttons appear in the panel once you've earned them.
+Your height, score, Flow-freeze and Reveal are in the side panel (at the bottom on a phone). Pickups count when the water flows through them.
 
 **Keyboard:** use the arrows or WASD to move the cursor and Space or Enter to tap. Q is Flow-freeze, E is Reveal and P pauses.
 

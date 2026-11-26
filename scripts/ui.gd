@@ -75,14 +75,18 @@ class IconArt:
 
 var game  ## The Game node (main.gd).
 var root: Control
-var hud: Panel
-var stat_values := {}
+var hud: Control
+var stat_values := {}     ## "HEIGHT" / "SCORE" -> value Label.
+var stat_captions := {}   ## "HEIGHT" / "SCORE" -> caption Label.
+var _stats_key := ""
 var btn_freeze: IconButton
 var btn_reveal: IconButton
 var banner: Label
 var toast: Label
 var title_screen: Control
-var new_game_button: Button
+var new_game_button: Button   ## The MEDIUM button (Enter also starts the last difficulty).
+var difficulty_buttons := {}  ## "easy" / "medium" / "hard" -> Button.
+var _diff_row: HBoxContainer
 var logo: StationLogo
 var pause_screen: Control
 var pause_mute: Button
@@ -270,27 +274,18 @@ func _center_of(o: Control) -> CenterContainer:
 # --- HUD ----------------------------------------------------------------------------------
 
 func _build_hud() -> void:
-	hud = Panel.new()
+	# Height and score live in the side panel (or the bottom bar in portrait);
+	# refresh() places them inside game.stats_rect every frame.
+	hud = Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(hud)
-	var hb := HBoxContainer.new()
-	hb.name = "Stats"
-	hb.add_theme_constant_override("separation", 6)
-	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(hb)
-	# The HUD shows the two things that matter: height and score.
-	hb.alignment = BoxContainer.ALIGNMENT_CENTER
-	hb.add_theme_constant_override("separation", 48)
 	for key in ["HEIGHT", "SCORE"]:
-		var vb := VBoxContainer.new()
-		vb.custom_minimum_size = Vector2(130, 0)
-		vb.add_theme_constant_override("separation", -6)
-		vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var cap := _label(key, 14, Color(0.56, 0.72, 0.8), 0)
 		var val := _label("0", 30, Color.WHITE, 6)
-		vb.add_child(cap)
-		vb.add_child(val)
-		hb.add_child(vb)
+		hud.add_child(cap)
+		hud.add_child(val)
+		stat_captions[key] = cap
 		stat_values[key] = val
 	# Milestone powers, earned every 100 rows.
 	btn_freeze = _icon_button("freeze", func(): game.use_freeze())
@@ -350,7 +345,7 @@ func _build_title() -> void:
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	title_screen.add_child(backdrop)
 	title_screen.move_child(backdrop, 0)
-	# A simple menu: the name and one button.
+	# A simple menu: the name and one button per difficulty.
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 36)
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -358,14 +353,24 @@ func _build_title() -> void:
 	logo = StationLogo.new()
 	logo.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	vb.add_child(logo)
-	new_game_button = _button("NEW GAME", func(): game.start_run(), 300)
-	new_game_button.custom_minimum_size = Vector2(300, 76)
-	new_game_button.add_theme_font_size_override("font_size", 36)
-	new_game_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	new_game_button.add_theme_stylebox_override("normal", _box(STEEL, HAZARD, 6, 4))
-	new_game_button.add_theme_stylebox_override("hover", _box(STEEL.lightened(0.12), HAZARD.lightened(0.3), 6, 4))
-	new_game_button.add_theme_stylebox_override("pressed", _box(STEEL_DARK, HAZARD, 6, 4))
-	vb.add_child(new_game_button)
+	# One button per difficulty: EASY (slow water), MEDIUM, HARD (fast water).
+	_diff_row = HBoxContainer.new()
+	_diff_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_diff_row.add_theme_constant_override("separation", 14)
+	_diff_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_diff_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	vb.add_child(_diff_row)
+	var trims := {"easy": WATER, "medium": HAZARD, "hard": Color("ff6a3a")}
+	for d in Tuning.DIFFICULTIES:
+		var diff: String = d
+		var b := _button(diff.to_upper(), func(): game.start_run(diff), 200)
+		var trim: Color = trims[diff]
+		b.add_theme_stylebox_override("normal", _box(STEEL, trim, 6, 4))
+		b.add_theme_stylebox_override("hover", _box(STEEL.lightened(0.12), trim.lightened(0.3), 6, 4))
+		b.add_theme_stylebox_override("pressed", _box(STEEL_DARK, trim, 6, 4))
+		_diff_row.add_child(b)
+		difficulty_buttons[diff] = b
+	new_game_button = difficulty_buttons["medium"]
 
 
 func _build_pause() -> void:
@@ -430,11 +435,12 @@ func show_pause(p: bool) -> void:
 	pause_screen.visible = p
 
 
-func show_game_over(reason: String, score: int, height: int, best: int, is_new: bool) -> void:
+func show_game_over(reason: String, score: int, height: int, best: int, is_new: bool, difficulty := "medium") -> void:
 	over_reason.text = reason
+	over_reason.visible = reason != ""
 	over_score.text = "%d" % score
 	over_height.text = "HEIGHT  %d rows" % height
-	over_best.text = "BEST  %d" % best
+	over_best.text = "%s BEST  %d" % [difficulty.to_upper(), best]
 	over_new.visible = is_new
 	over_screen.visible = true
 	over_screen.modulate.a = 0.0
@@ -488,6 +494,7 @@ func refresh() -> void:
 
 	_set_text(stat_values["HEIGHT"], "%d" % game.height)
 	_set_text(stat_values["SCORE"], "%d" % game.score)
+	_place_stats()
 
 	_refresh_powers()
 	var mt := "SOUND: OFF" if game.sfx.muted else "SOUND: ON"
@@ -517,6 +524,37 @@ func refresh() -> void:
 		var pp := Vector2(roundf((vs.x - ps.x) * 0.5), roundf(b.end.y - ps.y - 16.0))
 		if picker.position != pp:
 			picker.position = pp
+
+
+## Height and score inside game.stats_rect, each a small caption over a big
+## number: stacked in the side panel, side by side in the portrait bottom bar.
+func _place_stats() -> void:
+	var r: Rect2 = game.stats_rect
+	var key := "%s|%s" % [r, game.portrait]
+	if key == _stats_key:
+		return
+	_stats_key = key
+	var keys := ["HEIGHT", "SCORE"]
+	for i in 2:
+		var cap: Label = stat_captions[keys[i]]
+		var val: Label = stat_values[keys[i]]
+		var cell: Rect2
+		if game.portrait:
+			cell = Rect2(r.position.x + i * r.size.x * 0.5, r.position.y, r.size.x * 0.5, r.size.y)
+		else:
+			cell = Rect2(r.position.x, r.position.y + i * r.size.y * 0.5, r.size.x, r.size.y * 0.5)
+		var val_fs := int(clampf(minf(cell.size.y * 0.5, cell.size.x * 0.24), 16.0, 40.0))
+		var cap_fs := int(clampf(val_fs * 0.45, 11.0, 16.0))
+		var top := cell.position.y + cell.size.y * 0.5 - (cap_fs + val_fs) * 0.62
+		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cap.position = Vector2(cell.position.x, top)
+		cap.size = Vector2(cell.size.x, cap_fs * 1.3)
+		val.position = Vector2(cell.position.x, top + cap_fs * 1.05)
+		val.size = Vector2(cell.size.x, val_fs * 1.3)
+		cap.add_theme_font_size_override("font_size", cap_fs)
+		val.add_theme_font_size_override("font_size", val_fs)
+		val.add_theme_constant_override("outline_size", maxi(3, val_fs / 5))
 
 
 func _refresh_powers() -> void:
@@ -565,11 +603,14 @@ func _apply_layout() -> void:
 		(art.get_parent() as Control).custom_minimum_size = Vector2(pb, pb)
 	picker.reset_size()
 	_picker_zone = -1
-	hud.position = Vector2.ZERO
-	hud.size = Vector2(vs.x, game.hud_h)
-	var hb := hud.get_node("Stats") as HBoxContainer
-	hb.position = Vector2(10, 4)
-	hb.size = Vector2(vs.x - 20, game.hud_h - 8)
+	_stats_key = ""
+	# Difficulty buttons: one row that always fits the screen width.
+	var bw := clampf((vs.x - 48.0 - 28.0) / 3.0, 120.0, 210.0)
+	var bh := 76.0 if vs.y >= 600.0 else 64.0
+	var bfs := int(clampf(bw * 0.17, 22.0, 34.0))
+	for b in difficulty_buttons.values():
+		(b as Button).custom_minimum_size = Vector2(bw, bh)
+		(b as Button).add_theme_font_size_override("font_size", bfs)
 	banner.position = Vector2(0, -vs.y * 0.22)
 	banner.size = vs
 	toast.position = Vector2(20, -vs.y * 0.5 + game.hud_h + 40)

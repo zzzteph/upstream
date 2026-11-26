@@ -80,14 +80,18 @@ func _run() -> void:
 	check(game.state == S.TITLE, "starts on the title screen")
 	check(game.ui.title_screen.visible, "title overlay visible")
 
-	# --- the menu: one NEW GAME button; clicking elsewhere does nothing ---
-	check(game.ui.title_screen.visible and game.ui.new_game_button.is_visible_in_tree(), "the menu shows a NEW GAME button")
+	# --- the menu: EASY / MEDIUM / HARD buttons; clicking elsewhere does nothing ---
+	var screen := Rect2(Vector2.ZERO, game.view_size)
+	for d in Tuning.DIFFICULTIES:
+		var b: Button = game.ui.difficulty_buttons[d]
+		check(b.is_visible_in_tree() and screen.encloses(b.get_global_rect()), "the menu shows a %s button on screen" % d.to_upper())
+	check(not (load("res://scripts/station_logo.gd") as Script).get_script_constant_map().has("SUBTITLE"), "the nameplate has no subtitle")
 	click(Vector2(game.view_size.x * 0.5, game.view_size.y * 0.92))
 	await frames(1)
-	check(game.state == S.TITLE, "clicking beside the button does not start a game")
+	check(game.state == S.TITLE, "clicking beside the buttons does not start a game")
 	click(game.ui.new_game_button.get_global_rect().get_center())
 	await frames(2)
-	check(game.state == S.COUNTDOWN, "NEW GAME starts the countdown")
+	check(game.state == S.COUNTDOWN and game.difficulty == "medium", "MEDIUM starts the countdown on medium")
 	check(not game.ui.title_screen.visible, "title hidden")
 	check(game.countdown > 9.0, "10 second countdown")
 
@@ -301,6 +305,8 @@ func _run() -> void:
 		await frames(1)
 		guard += 1
 	check(game.last_reason == "locked", "goo reaching a locked tile spills (got %s)" % game.last_reason)
+	await frames(120)
+	check(game.state == S.GAMEOVER and not game.ui.over_reason.visible, "no message on the game-over screen for a closed block")
 	# A long unlock-mode run, played by the autoplay bot through the same clicks.
 	game.start_run()
 	game.debug_autoplay = true
@@ -314,22 +320,56 @@ func _run() -> void:
 	check(game.height >= 120, "unlock mode: autoplay climbs to row 120 (reached %d, %s)" % [game.height, game.last_reason])
 	print("unlock run: height %d, score %d, flips %d, alarms %d" % [game.height, game.score, game.flips, game.alarms])
 
-	# --- milestone powers: Flow-freeze and Reveal every 100 rows ---
+	# --- difficulty: EASY / MEDIUM / HARD scale the water's speed ---
+	var speeds := {"easy": 0.5, "medium": 1.0, "hard": 1.25}
+	for d in Tuning.DIFFICULTIES:
+		game.go_to_title()
+		await frames(1)
+		click((game.ui.difficulty_buttons[d] as Button).get_global_rect().get_center())
+		await frames(2)
+		check(game.state == S.COUNTDOWN and game.difficulty == d, "%s button starts a %s run" % [d.to_upper(), d])
+		game._start_flow()
+		check(is_equal_approx(game.effective_speed(), game.height_speed() * speeds[d]),
+				"%s: water at %.2fx of the base speed (got %.3f vs %.3f)" % [d, speeds[d], game.effective_speed(), game.height_speed()])
+		check(game.freezes == Tuning.START_POWERS and game.reveals == Tuning.START_POWERS,
+				"%s: the run starts with one Flow-freeze and one Reveal" % d)
+		check(game.ui.btn_freeze.visible and game.ui.btn_reveal.visible, "%s: power buttons are there from the start" % d)
+	game.start_run()
+	await frames(1)
+	check(game.difficulty == "hard", "playing again keeps the difficulty")
+	check(SaveData._keys("medium") == [SaveData.KEY, "best"] and SaveData._keys("hard") != SaveData._keys("medium"),
+			"each difficulty keeps its own best score (medium keeps the old record)")
+	SaveData.save_best(SaveData.load_best("hard") + 1, "hard")
+	check(SaveData.load_best("hard") > 0, "a hard best score saves and loads")
+	game.ui.show_game_over("", 10, 1, 20, false, "hard")
+	check(game.ui.over_best.text.begins_with("HARD BEST"), "game over names the difficulty of the best score")
+	game.ui.over_screen.visible = false
+
+	# --- height and score sit in the side panel; no top bar ---
+	await frames(2)
+	check(game.board_rect.position.y == 0.0, "no top bar: the board starts at the top of the screen")
+	check(game.queue_rect.encloses(game.stats_rect), "the stats area is inside the panel")
+	for k in ["HEIGHT", "SCORE"]:
+		var lr: Rect2 = (game.ui.stat_values[k] as Label).get_global_rect()
+		check(game.queue_rect.encloses(lr) and not lr.intersects(game.board_rect), "%s value sits in the panel" % k)
+	game.score = 4321
+	await frames(1)
+	check((game.ui.stat_values["SCORE"] as Label).text == "4321", "the panel shows the score")
+
+	# --- milestone powers: one of each to start, then another pair every 100 rows ---
 	game.mode = "unlock"
 	game.start_run()
 	await frames(2)
-	check(not game.ui.btn_freeze.visible and not game.ui.btn_reveal.visible, "no power buttons before row 100")
 	game._set_height(100)
-	check(game.freezes == 1 and game.reveals == 1, "row 100 gives one Flow-freeze and one Reveal")
+	check(game.freezes == 2 and game.reveals == 2, "row 100 gives one more Flow-freeze and Reveal")
 	game._set_height(250)
-	check(game.freezes == 2 and game.reveals == 2, "row 200 gives another pair")
+	check(game.freezes == 3 and game.reveals == 3, "row 200 gives another pair")
 	# Use them on a fresh board (jumping the height to 250 above dropped the pump's rows).
 	game.start_run()
 	game.freezes = 2
 	game.reveals = 2
 	await frames(2)
-	check(game.ui.btn_freeze.visible and game.ui.btn_reveal.visible, "power buttons appear once you have charges")
-	var screen := Rect2(Vector2.ZERO, game.view_size)
+	check(game.ui.btn_freeze.visible and game.ui.btn_reveal.visible, "power buttons are shown while you have charges")
 	check(screen.encloses(game.ui.btn_freeze.get_global_rect()) and screen.encloses(game.ui.btn_reveal.get_global_rect()), "power buttons are fully on screen")
 	click(game.ui.btn_reveal.get_global_rect().get_center())
 	await frames(1)

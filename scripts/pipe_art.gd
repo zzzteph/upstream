@@ -42,48 +42,94 @@ static func font() -> Font:
 	return _font
 
 
-## The rounded, bevelled floor of a board cell.
+## The floor of an open board cell: a dark recessed socket with a thin rim and
+## corner marks, so an empty slot reads as "a place to put a pipe" and never
+## looks like a closed block (which is light and raised, see draw_locked).
 static func draw_tile_base(ci: CanvasItem, rect: Rect2, pal: Dictionary, checker: bool) -> void:
-	if _base_sb == null:
-		_base_sb = StyleBoxFlat.new()
-		_base_sb.anti_aliasing = aa
-	var T := rect.size.x
-	var r := rect.grow(-T * 0.035)
-	var base: Color = pal["tile"]
-	if checker:
-		base = base.lightened(0.04)
-	_base_sb.bg_color = base
-	_base_sb.set_corner_radius_all(int(T * 0.14))
-	_base_sb.border_width_bottom = int(maxf(2.0, T * 0.06))
-	_base_sb.border_color = pal["tile_lo"]
-	ci.draw_style_box(_base_sb, r)
-	ci.draw_line(r.position + Vector2(T * 0.14, T * 0.03), Vector2(r.end.x - T * 0.14, r.position.y + T * 0.03), pal["tile_hi"], maxf(1.5, T * 0.03))
-
-
-## A closed tile: a plain raised steel block (opening it shows what's under).
-static func draw_locked(ci: CanvasItem, rect: Rect2, pal: Dictionary) -> void:
 	if _base_sb == null:
 		_base_sb = StyleBoxFlat.new()
 	_base_sb.anti_aliasing = aa
 	var T := rect.size.x
 	var r := rect.grow(-T * 0.035)
-	var block: Color = (pal["metal_dark"] as Color).lerp(pal["tile"], 0.4)
-	_base_sb.bg_color = block
+	var tile: Color = pal["tile"]
+	var hole := tile.darkened(0.42)
+	if checker:
+		hole = hole.lightened(0.035)
+	# Rim.
+	_base_sb.bg_color = tile.darkened(0.08)
+	_base_sb.set_corner_radius_all(int(T * 0.12))
+	_base_sb.set_border_width_all(0)
+	ci.draw_style_box(_base_sb, r)
+	# The socket, with a shadow cast by its top edge.
+	var inner := r.grow(-T * 0.05)
+	_base_sb.bg_color = hole
+	_base_sb.set_corner_radius_all(int(T * 0.08))
+	_base_sb.border_width_top = int(maxf(2.0, T * 0.07))
+	_base_sb.border_color = hole.darkened(0.45)
+	ci.draw_style_box(_base_sb, inner)
+	_base_sb.set_border_width_all(0)
+	# Light catching the bottom lip.
+	ci.draw_line(Vector2(inner.position.x + T * 0.1, inner.end.y - T * 0.012), Vector2(inner.end.x - T * 0.1, inner.end.y - T * 0.012),
+			fade(pal["tile_hi"], 0.6), maxf(1.0, T * 0.022))
+	# Corner marks.
+	var m := fade((pal["tile_hi"] as Color).lightened(0.15), 0.5)
+	var w := maxf(1.5, T * 0.026)
+	var L := T * 0.13
+	var a := inner.grow(-T * 0.07)
+	for corner in [[a.position, Vector2(1, 1)], [Vector2(a.end.x, a.position.y), Vector2(-1, 1)],
+			[Vector2(a.position.x, a.end.y), Vector2(1, -1)], [a.end, Vector2(-1, -1)]]:
+		var p: Vector2 = corner[0]
+		var d: Vector2 = corner[1]
+		ci.draw_line(p, p + Vector2(d.x * L, 0), m, w)
+		ci.draw_line(p, p + Vector2(0, d.y * L), m, w)
+
+
+## A closed tile: a light, raised steel hatch with a tread-plate pattern and a
+## drop shadow (opening it shows what's under). Deliberately much lighter than
+## the dark recessed socket of an open slot.
+static func draw_locked(ci: CanvasItem, rect: Rect2, pal: Dictionary) -> void:
+	if _base_sb == null:
+		_base_sb = StyleBoxFlat.new()
+	_base_sb.anti_aliasing = aa
+	var T := rect.size.x
+	var r := rect.grow(-T * 0.04)
+	r.size.y -= T * 0.04
+	var plate: Color = (pal["metal"] as Color).lerp(pal["metal_dark"], 0.42)
+	var light: Color = pal["metal_light"]
+	# Drop shadow, then the plate with a dark lower edge for thickness.
+	_base_sb.set_border_width_all(0)
 	_base_sb.set_corner_radius_all(int(T * 0.1))
-	_base_sb.border_width_bottom = int(maxf(2.0, T * 0.08))
-	_base_sb.border_color = block.darkened(0.45)
+	_base_sb.bg_color = Color(0, 0, 0, 0.5)
+	ci.draw_style_box(_base_sb, Rect2(r.position + Vector2(0, T * 0.06), r.size))
+	_base_sb.bg_color = plate
+	_base_sb.border_width_bottom = int(maxf(2.0, T * 0.07))
+	_base_sb.border_color = plate.darkened(0.5)
 	ci.draw_style_box(_base_sb, r)
 	_base_sb.border_width_bottom = 0
-	# Raised face: a lighter top edge and a slightly lighter centre panel.
-	var light: Color = (pal["metal"] as Color).lightened(0.1)
-	ci.draw_line(r.position + Vector2(T * 0.1, T * 0.04), Vector2(r.end.x - T * 0.1, r.position.y + T * 0.04), fade(light, 0.7), maxf(1.0, T * 0.035))
-	_base_sb.bg_color = block.lightened(0.06)
-	_base_sb.set_corner_radius_all(int(T * 0.06))
-	ci.draw_style_box(_base_sb, Rect2(r.position + Vector2(T * 0.14, T * 0.14), r.size - Vector2(T * 0.28, T * 0.3)))
-	for cpos in [Vector2(0.15, 0.15), Vector2(0.85, 0.15), Vector2(0.15, 0.8), Vector2(0.85, 0.8)]:
+	# Bevel: light along the top and left edges.
+	var hi := fade(light, 0.55)
+	var bw := maxf(1.5, T * 0.03)
+	ci.draw_line(r.position + Vector2(T * 0.1, T * 0.025), Vector2(r.end.x - T * 0.1, r.position.y + T * 0.025), hi, bw)
+	ci.draw_line(r.position + Vector2(T * 0.025, T * 0.1), Vector2(r.position.x + T * 0.025, r.end.y - T * 0.16), fade(light, 0.3), bw)
+	# Tread plate: short raised ribs, alternating direction.
+	var area := Rect2(r.position + Vector2(T * 0.17, T * 0.15), r.size - Vector2(T * 0.34, T * 0.36))
+	var n := 4
+	var cell := area.size / float(n)
+	var rw := maxf(1.5, T * 0.034)
+	var rib_hi := plate.lightened(0.28)
+	var rib_lo := plate.darkened(0.35)
+	for i in n:
+		for j in n:
+			var cc := area.position + Vector2((i + 0.5) * cell.x, (j + 0.5) * cell.y)
+			var d := Vector2(1, -1) if (i + j) % 2 == 0 else Vector2(1, 1)
+			d = d.normalized() * minf(cell.x, cell.y) * 0.3
+			ci.draw_line(cc - d + Vector2(1, 1) * T * 0.012, cc + d + Vector2(1, 1) * T * 0.012, rib_lo, rw)
+			ci.draw_line(cc - d, cc + d, rib_hi, rw)
+	# Rivets.
+	for cpos in [Vector2(0.13, 0.12), Vector2(0.87, 0.12), Vector2(0.13, 0.8), Vector2(0.87, 0.8)]:
 		var p: Vector2 = rect.position + cpos * T
-		ci.draw_circle(p, T * 0.04, block.darkened(0.5))
-		ci.draw_circle(p - Vector2(T, T) * 0.01, T * 0.025, light)
+		ci.draw_circle(p, T * 0.036, plate.darkened(0.55))
+		ci.draw_circle(p - Vector2(T, T) * 0.009, T * 0.022, light.darkened(0.1))
 
 
 static func fade(c: Color, a: float) -> Color:

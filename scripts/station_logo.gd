@@ -3,12 +3,11 @@
 ## ============================================================================
 ## A riveted steel plate like the ones bolted to pump-station machinery: a
 ## pressure gauge, the name in stencil letters (the bridges cut across them),
-## and a hazard-striped strip along the bottom.
+## and a hazard-striped strip along the bottom. No subtitle.
 class_name StationLogo
 extends Control
 
 const NAME := "UPSTREAM"
-const SUBTITLE := "PUMP STATION  -  KEEP THE WATER RISING"
 const BASE_FONT := 104
 const STEEL := Color("2a3640")
 const STEEL_LIGHT := Color("4a5a66")
@@ -58,7 +57,7 @@ func _plate_size(k: float) -> Vector2:
 
 func _update_size() -> void:
 	var p := _plate_size(scale_k)
-	custom_minimum_size = Vector2(p.x + 12.0, p.y + 46.0 * scale_k)
+	custom_minimum_size = Vector2(p.x + 12.0, p.y + 10.0 * scale_k)
 	update_minimum_size()
 
 
@@ -96,13 +95,8 @@ func _draw() -> void:
 	var tw := f.get_string_size(NAME, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	# Stencil bridges: a cut through every letter, in the plate colour.
 	draw_rect(Rect2(tx - 4.0 * k, baseline - fs * 0.40, tw + 8.0 * k, maxf(3.0, fs * 0.065)), STEEL)
-	# A water-blue rule under the name, then the subtitle beneath the plate.
+	# A water-blue rule under the name.
 	draw_rect(Rect2(tx, baseline + fs * 0.1, tw, maxf(2.0, 4.0 * k)), WATER)
-	var sfs := int(maxf(11.0, 19.0 * k))
-	var sub_w := f.get_string_size(SUBTITLE, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs).x
-	var sp := Vector2((size.x - sub_w) * 0.5, plate.end.y + 30.0 * k)
-	draw_string_outline(f, sp, SUBTITLE, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, 4, Color(0, 0, 0, 0.85))
-	draw_string(f, sp, SUBTITLE, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, Color("8fb8cc"))
 
 
 func _hazard(band: Rect2, k: float) -> void:
