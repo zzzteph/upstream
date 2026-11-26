@@ -24,11 +24,12 @@ const UI_BASE_MIN := 480             ## ...and on phones, so text and buttons st
 # --- Flow -------------------------------------------------------------------
 const COUNTDOWN_TIME := 10.0         ## Seconds before the goo starts flowing.
 const BASE_SEGMENT_TIME := 2.6       ## Seconds to fill one tile at speed 1.0x.
-const SPEEDUP_PER_ROW := 0.012       ## Speed gained per row climbed (+1.2% per row).
-const MAX_SPEED := 3.5               ## Cap on the height-based speed factor.
+const SPEEDUP_PER_ROW := 0.01        ## Speed gained per row climbed: +1% of the starting speed per row...
+const SPEEDUP_MAX_ROW := 300         ## ...up to this row (4x the starting speed); flat after that.
 const FAST_FORWARD_MULT := 5.0       ## Fast-forward flow multiplier (debug / tests).
 const HOLD_SPEED_MULT := 4.0         ## Water (and countdown) speed while the screen is held.
 const HOLD_DELAY := 0.3              ## Seconds a press must last before it counts as a hold.
+const HOLD_SCORE_MULT := 2           ## Points per tube are multiplied by this while holding.
 const RESERVOIR_FILL_FACTOR := 4.0   ## Reservoir tiles take this many times longer to fill.
 const NARROW_FILL_FACTOR := 2.5      ## Narrow pipes take this many times longer to fill.
 const NARROW_CHANCE := 0.16          ## Chance a pipe (hidden or in the queue) is narrow.
@@ -46,16 +47,12 @@ const UNLOCK_PIECE_FILL := 0.72      ## Chance a closed block hides a pipe (othe
 const UNLOCK_SPINE_PIECE_CHANCE := 0.5 ## Chance a guaranteed-path tile already hides the pipe it needs.
 const FLIP_TIME := 0.3               ## Seconds of the unlock flip animation.
 
-# --- Difficulty -------------------------------------------------------------
-const DIFFICULTIES := ["easy", "medium", "hard"]  ## Menu order.
-## Water speed multiplier per difficulty (on top of the height-based speed).
-const DIFFICULTY_SPEED := {"easy": 0.5, "medium": 1.0, "hard": 1.25}
-const DEFAULT_DIFFICULTY := "medium" ## Used by Enter on the menu until a button is picked.
-
 # --- AI player ------------------------------------------------------------
 const AI_MOVE_SPEED := 1400.0        ## Pointer speed in px/s (plus a short settle time per move).
 const AI_THINK_MIN := 0.06           ## Pause between actions, seconds (random in this range).
 const AI_THINK_MAX := 0.18
+const AI_CURVY := 25.0               ## How hard the AI snakes wall to wall (cost per column it skips before going up).
+const AI_CURVY_UNTIL_SPEED := 3.0    ## ...fading out as the water nears this speed (full at 1 below it).
 
 # --- Milestone powers -------------------------------------------------------
 const START_POWERS := 1              ## Flow-freezes and Reveals you start every run with.
@@ -65,7 +62,6 @@ const FREEZE_TIME := 8.0             ## Seconds the flow stays frozen.
 # --- Scoring ----------------------------------------------------------------
 ## Points only for progress: no multipliers, bonuses or penalties.
 const SCORE_TUBE := 1                ## Per tube the water fills (a cross filled both ways counts twice).
-const SCORE_ROW := 3                 ## Per new row the water reaches.
 
 # --- Camera / memory --------------------------------------------------------
 const CAMERA_LEAD_FRACTION := 0.33   ## Goo head is kept this far up from the bottom.

@@ -41,11 +41,62 @@ var _arc := 1.0
 var _hold_check := 0.0
 var _hurry := false              ## Under time pressure: quicker moves, shorter pauses.
 var last_plan := {}              ## The most recent plan (debugging / tests).
+var _danger := false             ## The last decision saw the water about to win.
 var tally := {}                  ## Taps by kind (debugging / tests).
 var trace: Array = []            ## Recent decisions, when debugging (set trace_on).
 var trace_on := false
 var _layer: CanvasLayer
 var _view: Control
+
+
+## A binary min-heap of (cost, state) for the route search.
+class MinHeap:
+	var k: Array = []
+	var v: Array = []
+
+	func is_empty() -> bool:
+		return k.is_empty()
+
+	func push(key: float, val) -> void:
+		k.append(key)
+		v.append(val)
+		var i := k.size() - 1
+		while i > 0:
+			var p := (i - 1) >> 1
+			if k[p] <= k[i]:
+				break
+			_swap(i, p)
+			i = p
+
+	func pop():
+		var top = v[0]
+		var last := k.size() - 1
+		k[0] = k[last]
+		v[0] = v[last]
+		k.pop_back()
+		v.pop_back()
+		var i := 0
+		var n := k.size()
+		while true:
+			var l := i * 2 + 1
+			var m := i
+			if l < n and k[l] < k[m]:
+				m = l
+			if l + 1 < n and k[l + 1] < k[m]:
+				m = l + 1
+			if m == i:
+				break
+			_swap(i, m)
+			i = m
+		return top
+
+	func _swap(a: int, b: int) -> void:
+		var tk = k[a]
+		k[a] = k[b]
+		k[b] = tk
+		var tv = v[a]
+		v[a] = v[b]
+		v[b] = tv
 
 
 class PointerView:
@@ -107,9 +158,11 @@ func _process(dt: float) -> void:
 		if _hold_check > 0.0:
 			return
 		_hold_check = 0.2
-		var plan := _plan(_water())
-		var at_hold: float = float(plan.get("arrive_end", 0.0)) / Tuning.HOLD_SPEED_MULT
-		if plan.get("kind", "") == "open" and (plan.get("needs", []) as Array).is_empty() and at_hold >= 2.0:
+		var w := _water()
+		var plan := _plan(w)
+		var ae: float = float(plan.get("arrive_end", 0.0))
+		var end: Vector2i = plan.get("end", Vector2i(w["c"], w["r"]))
+		if (plan.get("needs", []) as Array).is_empty() and ae >= _hold_margin() and _hidden(end, int(w["row"])).is_empty():
 			return
 		game.ai_hold = false
 	press = maxf(0.0, press - dt * 6.0)
@@ -124,7 +177,7 @@ func _process(dt: float) -> void:
 			trace.append("t=%.1f water(%d,%d) kind=%s end=%s arrive_end=%.1f needs=%s -> %s" % [game.time, game.flow.col, game.flow.row,
 					lp.get("kind", "-"), lp.get("end", "-"), float(lp.get("arrive_end", -1.0)),
 					str(nd.map(func(n): return "%s@%.1f" % [n["cell"], n["arrive"]])), str(_queue.map(func(a): return [a.get("why", a["kind"]), a.get("c", -1), a.get("r", -1)]))])
-			if trace.size() > 14:
+			if trace.size() > 60:
 				trace.pop_front()
 		if _queue.is_empty():
 			_wait = 0.25
@@ -224,11 +277,12 @@ const SWAP_TIME := 1.3      ## Rough seconds for one pick-and-drop (two taps).
 const SWAP_TIME_HURRY := 0.8 ## The same when hurrying.
 const TAP_TIME := 0.6       ## Rough seconds for one tap.
 const INF_COST := 1.0e9
+const DEAD_END := 1000.0   ## How much worse a route into a dead end rates (per the row it reaches).
 
 
 ## Water speed in tiles per second-unit, without the AI's own hold.
 func _speed() -> float:
-	var s: float = game.height_speed() * float(Tuning.DIFFICULTY_SPEED.get(game.difficulty, 1.0))
+	var s: float = game.height_speed()
 	return maxf(0.01, s)
 
 
@@ -297,7 +351,7 @@ func _step(c: int, r: int, en: int, ex: int, lo: int, hi: int, have: Dictionary,
 	var t: Tile = game.grid.get_tile(c, r)
 	if t == null or t.hidden or t.kind != Tile.EMPTY:
 		return [INF_COST, -1]
-	var down := 3.0 if ex == P.S else 0.0
+	var down := 6.0 if ex == P.S else 0.0
 	if t.piece >= 0 and P.exit_dir(t.piece, en) == ex and (t.special != Tile.SP_ONEWAY or t.oneway_entry == en) \
 			and t.fill_entry[P.channel_for(t.piece, en)] < 0:
 		var slow := t.special == Tile.SP_RESERVOIR or t.narrow
@@ -331,8 +385,14 @@ func _plan(w: Dictionary) -> Dictionary:
 		have[p] = (pool[p] as Array).size()
 	var penalty := {}
 	var best := {}
+	# How strongly to snake across the full width before going up: strong while
+	# the water is slow (more tubes, more points, more interesting), fading out
+	# as it gets fast, and off when the last plan was in danger.
+	var curvy := Tuning.AI_CURVY * clampf((Tuning.AI_CURVY_UNTIL_SPEED - _speed()) / 1.0, 0.0, 1.0)
+	if _danger:
+		curvy = 0.0
 	for attempt in 4:
-		best = _search(w, lo, hi, have, penalty)
+		best = _search(w, lo, hi, have, penalty, curvy)
 		if best.is_empty():
 			return {}
 		# Check the pipes the route needs against what's on screen (cells the
@@ -374,19 +434,19 @@ func _plan(w: Dictionary) -> Dictionary:
 	return best
 
 
-func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Dictionary) -> Dictionary:
-	var start := Vector3i(w["c"], w["r"], w["e"])
+## Dijkstra over (column, row, side the water comes in from, column where the
+## route entered this row). The last part lets it snake: turning up costs
+## `curvy` for every column it could still have travelled towards the far wall.
+func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Dictionary, curvy: float) -> Dictionary:
+	var start := Vector4i(w["c"], w["r"], w["e"], w["c"])
+	var spans := {}
 	var dist := {start: 0.0}
 	var prev := {}
-	var open: Array = [start]
+	var heap := MinHeap.new()
+	heap.push(0.0, start)
 	var done := {}
-	while not open.is_empty():
-		var bi := 0
-		for i in range(1, open.size()):
-			if dist[open[i]] < dist[open[bi]]:
-				bi = i
-		var u: Vector3i = open[bi]
-		open.remove_at(bi)
+	while not heap.is_empty():
+		var u: Vector4i = heap.pop()
 		if done.has(u):
 			continue
 		done[u] = true
@@ -396,19 +456,34 @@ func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Diction
 			var st := _step(u.x, u.y, u.z, ex, lo, hi, have, penalty)
 			if st[0] >= INF_COST:
 				continue
+			var cost: float = st[0]
+			var na := u.w
+			if ex == P.N or ex == P.S:
+				if ex == P.N and curvy > 0.0:
+					# Only columns it could really have reached count: rocks,
+					# walls and full pipes end the row's span.
+					var key := Vector2i(u.y, u.w)
+					if not spans.has(key):
+						spans[key] = _row_span(u.y, u.w)
+					cost += curvy * float(maxi(0, int(spans[key]) - absi(u.x - u.w)))
+				na = u.x
 			var dv: Vector2i = P.DIR_VEC[ex]
-			var v := Vector3i(u.x + dv.x, u.y + dv.y, P.opposite(ex))
-			var nd: float = dist[u] + st[0]
+			var v := Vector4i(u.x + dv.x, u.y + dv.y, P.opposite(ex), na)
+			var nd: float = dist[u] + cost
 			if nd < float(dist.get(v, INF_COST)):
 				dist[v] = nd
 				prev[v] = [u, ex, st[1]]
-				open.append(v)
-	# Pick where the route should stop: as high as possible, then cheapest.
-	var best_u := Vector3i(-99, -99, -1)
-	var best_val := -INF
-	var best_kind := ""
+				heap.push(nd, v)
+	# Where should the route stop? As high as possible, then cheapest - but
+	# while snaking, every column travelled along the current row counts too
+	# (enough that reaching the far wall beats turning up early), so it opens
+	# the hatches along the row instead of rushing up. Try the candidates best
+	# first; skip any whose route would cross itself.
+	var along := 50.0 * curvy / Tuning.AI_CURVY
+	var cands: Array = []
 	for u in dist:
-		var kind := _end_kind(u, hi)
+		var u3 := Vector3i(u.x, u.y, u.z)
+		var kind := _end_kind(u3, hi)
 		var height: float = u.y
 		var val := 0.0
 		match kind:
@@ -417,29 +492,54 @@ func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Diction
 			"hidden":
 				# A closed hatch with few ways out (walls, rocks around it) is a
 				# likely dead end: rate it lower.
-				val = height * 100.0 + 50.0 - (3 - _escapes(u)) * 60.0
+				val = height * 100.0 + 50.0 - (3 - _escapes(u3)) * 60.0 + along * absi(u.x - u.w)
 			"stuck":
-				val = height * 100.0 + 20.0
+				val = height * 100.0 + 20.0 + along * absi(u.x - u.w)
 			_:
-				val = height * 100.0 - 1000.0
-		val -= dist[u]
+				val = height * 100.0 - DEAD_END
+		cands.append([val - float(dist[u]), u, kind])
+	cands.sort_custom(func(a, b): return a[0] > b[0])
+	# Try them best first; skip any whose route would cross itself. A closed
+	# hatch or open cell where the water couldn't climb two more rows - through
+	# cells not known to be blocked and not on the route itself - is a sealed
+	# pocket: it counts as a dead end. (That only ever lowers a value, so stop
+	# once nothing further down the list can beat the best so far.)
+	var cells: Array = []
+	var best_u := start
+	var best_kind := "dead"
+	var best_val := -INF
+	var tried := 0
+	for cand in cands:
+		if float(cand[0]) <= best_val or tried >= 40:
+			break
+		tried += 1
+		var path: Array = []
+		var seen := {}
+		var end: Vector4i = cand[1]
+		var u: Vector4i = end
+		var ok := true
+		while u != start:
+			var pr: Array = prev[u]
+			var from: Vector4i = pr[0]
+			var cv := Vector2i(from.x, from.y)
+			if seen.has(cv):
+				ok = false
+				break
+			seen[cv] = true
+			path.push_front({"v": cv, "en": from.z, "ex": pr[1], "need": pr[2]})
+			u = from
+		if not ok:
+			continue
+		var val: float = cand[0]
+		var kind: String = cand[2]
+		if (kind == "hidden" or kind == "stuck") and not _can_climb(Vector2i(end.x, end.y), 2, int(w["row"]), seen):
+			kind = "dead"
+			val = end.y * 100.0 - DEAD_END - float(dist[end])
 		if val > best_val:
 			best_val = val
-			best_u = u
+			cells = path
+			best_u = end
 			best_kind = kind
-	# Walk back to the start.
-	var cells: Array = []
-	var seen := {}
-	var u := best_u
-	while u != start:
-		var pr: Array = prev[u]
-		var from: Vector3i = pr[0]
-		var cv := Vector2i(from.x, from.y)
-		if seen.has(cv):
-			return {}  # A loop through the same cell; shouldn't happen with these costs.
-		seen[cv] = true
-		cells.push_front({"v": cv, "en": from.z, "ex": pr[1], "need": pr[2]})
-		u = from
 	# When does the water reach each cell?
 	var sp := _speed()
 	var t: float = w["t0"]
@@ -469,6 +569,75 @@ func _escapes(u: Vector3i) -> int:
 	return n
 
 
+## How far a route entering row r at column a could run along the row: the
+## longer of the open stretches to its left and right (closed hatches count
+## as open; rocks, walls, full pipes and fixed pipes that don't run sideways
+## end a stretch).
+func _row_span(r: int, a: int) -> int:
+	var best := 0
+	for step in [-1, 1]:
+		var n := 0
+		var c: int = a + step
+		while c >= 0 and c < Tuning.COLS:
+			var t: Tile = game.grid.get_tile(c, r)
+			if t == null or (not t.hidden and (t.kind != Tile.EMPTY or t.has_goo()
+					or (t.fixed and t.piece != P.H and t.piece != P.CROSS))):
+				break
+			n += 1
+			c += step
+		best = maxi(best, n)
+	return best
+
+
+## Is there any way up from cell v - at least `rows_up` rows, or off the top
+## of the screen - through cells that aren't known to be blocked? Closed
+## hatches count as open; cells in `route` (the way the water gets to v) are
+## taken. A flood fill over the rows from the water upwards.
+func _can_climb(v: Vector2i, rows_up: int, water_row: int, route: Dictionary = {}) -> bool:
+	var top := _rows().y
+	var goal: int = mini(v.y + rows_up, top + 1)
+	var seen := route.duplicate()
+	seen[v] = true
+	var todo: Array = [v]
+	while not todo.is_empty():
+		var c: Vector2i = todo.pop_back()
+		if c.y >= goal:
+			return true
+		for d in 4:
+			var n: Vector2i = c + P.DIR_VEC[d]
+			if n.x < 0 or n.x >= Tuning.COLS or n.y < water_row or seen.has(n):
+				continue
+			seen[n] = true
+			if n.y > top:
+				return true
+			var t: Tile = game.grid.get_tile(n.x, n.y)
+			if t == null:
+				continue
+			if t.hidden or (t.kind == Tile.EMPTY and not t.has_goo()):
+				todo.append(n)
+	return false
+
+
+## Could the water go anywhere from state u (cell + side it comes in from),
+## judging by what's known? (Closed hatches might be open.)
+func _has_way_on(u: Vector3i) -> bool:
+	for d in [P.N, P.E, P.W, P.S]:
+		if d == u.z:
+			continue
+		var v: Vector2i = Vector2i(u.x, u.y) + P.DIR_VEC[d]
+		if v.x < 0 or v.x >= Tuning.COLS:
+			continue
+		var t: Tile = game.grid.get_tile(v.x, v.y)
+		if t == null:
+			continue
+		if t.hidden or (t.kind == Tile.EMPTY and not t.has_goo() and not t.fixed):
+			return true
+		if t.kind == Tile.EMPTY and t.fixed and not t.has_goo() and P.exit_dir(t.piece, P.opposite(d)) >= 0 \
+				and (t.special != Tile.SP_ONEWAY or t.oneway_entry == P.opposite(d)):
+			return true
+	return false
+
+
 ## What stops a route at state u (the cell the water would enter next).
 func _end_kind(u: Vector3i, hi: int) -> String:
 	if u.x < 0 or u.x >= Tuning.COLS:
@@ -484,7 +653,9 @@ func _end_kind(u: Vector3i, hi: int) -> String:
 		return "dead"
 	if t.piece >= 0 and (t.fixed or t.has_goo()):
 		return "dead"
-	return "stuck"
+	# An open cell it can't fill yet - unless it's boxed in (rocks, walls,
+	# full pipes all round), which makes it a dead end, not a wait.
+	return "stuck" if _has_way_on(u) else "dead"
 
 
 # --- deciding -------------------------------------------------------------------------------
@@ -526,6 +697,7 @@ func _decide() -> Array:
 		danger = true
 	if plan.is_empty() and w["t0"] < 1.5:
 		danger = true
+	_danger = danger
 	var hidden_near := _hidden(end, int(w["row"]), int(w["row"]) + 4)
 	# Hurry (like a person under pressure) when the work ahead barely fits the time left.
 	var work_time := needs.size() * SWAP_TIME + (TAP_TIME if kind == "hidden" else 0.0)
@@ -538,10 +710,15 @@ func _decide() -> Array:
 		if (arrive_end < 8.0 and arrive_end < hidden_near.size() * TAP_TIME + 2.0) or (_speed() > 2.0 and hidden_near.size() >= 12):
 			return [{"kind": "reveal"}]
 	# 4) Look before you leap: open the hatch where the route stops before
-	#    building towards it (it may hide a rock), unless a fix can't wait.
+	#    building towards it - it may hide a rock. Earliest deadline first: that
+	#    hatch must be seen while there is still time to re-route (open it, then
+	#    rebuild up to two pipes); the first fix must be done before the water
+	#    gets there. Whichever deadline comes sooner goes first.
 	var slack0: float = 99.0 if needs.is_empty() else float(needs[0]["arrive"]) - SWAP_TIME_HURRY
-	if kind == "hidden" and g.is_tile_visible(end.x, end.y) and (slack0 > TAP_TIME + 1.0 or (arrive_end < 6.0 and slack0 > TAP_TIME + 0.3)):
-		return [_tile(end, "flip")]
+	if kind == "hidden" and g.is_tile_visible(end.x, end.y):
+		var look_by := arrive_end - (TAP_TIME + 2.0 * SWAP_TIME_HURRY)
+		if look_by <= slack0 or slack0 > TAP_TIME + 1.0:
+			return [_tile(end, "flip")]
 	# 5) The most urgent fix first.
 	if not needs.is_empty() and (needs[0]["arrive"] < 6.0 or kind == "open"):
 		var sw := _swap(needs[0], plan)
@@ -574,15 +751,21 @@ func _decide() -> Array:
 		var up := _upgrade(plan)
 		if not up.is_empty():
 			return up
-	# 10) All built to the top of the screen: hold to hurry the water along
-	#     (only while it's slow - at speed the time is worth more than points).
-	if kind == "open" and needs.is_empty() and arrive_end > 4.0 and _speed() < 2.2:
-		return [{"kind": "hold"}]
-	# 11) Spare time: open hatches ahead so the next plan has more to work with.
+	# 10) Spare time: open hatches ahead so the next plan has more to work with.
 	var ahead := _hidden(end, int(w["row"]))
 	if not ahead.is_empty() and arrive_end > 3.0:
 		return [_tile(ahead[0], "flip")]
+	# 11) Nothing to fix and nothing to open, with the water well behind the
+	#     route: hold the screen to hurry it along (and score double).
+	if needs.is_empty() and arrive_end > _hold_margin() + 2.0:
+		return [{"kind": "hold"}]
 	return []
+
+
+## Seconds of built route (at normal speed) to keep ahead of the water while
+## holding: more when the water is fast.
+func _hold_margin() -> float:
+	return maxf(8.0, 3.0 * _speed())
 
 
 ## Pick-and-drop for one needed cell: fetch the best matching loose pipe.

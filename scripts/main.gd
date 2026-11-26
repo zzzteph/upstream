@@ -37,9 +37,8 @@ var ui: GameUI
 var sfx: Sfx
 
 # Run state
-var difficulty: String = Tuning.DEFAULT_DIFFICULTY  ## "easy", "medium" or "hard": scales the water speed.
 var score := 0
-var best := 0               ## Best score on the current difficulty.
+var best := 0               ## Best score so far.
 var height := 0            ## Highest row the goo has reached.
 var countdown := 0.0
 var fast_forward := false
@@ -72,7 +71,8 @@ var ai_hold := false               ## The AI player is "holding" the screen.
 var ai: AIPlayer
 var tutorial: Tutorial
 var tutorial_pending := false      ## Show the walkthrough at the next run (first game ever).
-var ai_used := false               ## The AI played part of this run: no best score.
+var ai_used := false               ## The AI played this run: no best score.
+var ai_game := false               ## The last run was started with WATCH AI (PLAY AGAIN repeats it).
 
 # Layout, in virtual pixels (720 on the short side).
 var view_size := Vector2(720, 720)
@@ -84,7 +84,6 @@ var board_rect := Rect2()
 var queue_rect := Rect2()
 var stats_rect := Rect2()    ## Height and score, inside the panel.
 var freeze_rect := Rect2()   ## Milestone power buttons (shown while playing).
-var ai_rect := Rect2()       ## The AI SOLVE toggle, below the power buttons.
 var reveal_rect := Rect2()
 var _slots: Array = []
 
@@ -122,7 +121,7 @@ func _ready() -> void:
 	ui = GameUI.new()
 	ui.game = self
 	add_child(ui)
-	best = SaveData.load_best(difficulty)
+	best = SaveData.load_best()
 	ai = AIPlayer.new()
 	ai.game = self
 	add_child(ai)
@@ -174,7 +173,7 @@ func new_board(seed_value: int) -> void:
 	grid.clear()
 	gen.reset(seed_value)
 	gen.unlock_mode = mode == "unlock"
-	gen.tutorial_start = tutorial_pending and mode == "unlock"
+	gen.tutorial_start = tutorial_pending and mode == "unlock" and not ai_game
 	_clear_hand()
 	freezes = Tuning.START_POWERS
 	reveals = Tuning.START_POWERS
@@ -212,24 +211,31 @@ func new_board(seed_value: int) -> void:
 	kb_active = false
 
 
-## Start a run. `diff` picks the difficulty ("easy", "medium", "hard"); empty keeps the last one.
-func start_run(diff := "") -> void:
-	if diff != "" and Tuning.DIFFICULTY_SPEED.has(diff):
-		difficulty = diff
-	best = SaveData.load_best(difficulty)
+## Start a run. `with_ai`: WATCH AI - the AI player plays the whole run (your
+## taps on the board are ignored, and it doesn't set a best score).
+func start_run(with_ai := false) -> void:
+	ai_game = with_ai and mode == "unlock"
+	best = SaveData.load_best()
 	new_board(rng.randi())
 	if debug_powers:
 		freezes = 3
 		reveals = 3
 	paused = false
 	state = State.COUNTDOWN
-	if ai != null and ai.enabled:
-		ai.set_enabled(false)
-	ai_used = false
+	if ai != null and ai.enabled != ai_game:
+		ai.set_enabled(ai_game)
+	ai_used = ai_game
 	ui.show_play()
 	sfx.play("click")
-	if tutorial_pending and mode == "unlock":
+	if ai_game:
+		ui.show_toast("AI IS PLAYING", Color("9dff8a"))
+	elif tutorial_pending and mode == "unlock":
 		tutorial.start()
+
+
+## PLAY AGAIN / RESTART: the same kind of run as the last one.
+func play_again() -> void:
+	start_run(ai_game)
 
 
 func go_to_title() -> void:
@@ -339,7 +345,7 @@ func _update_spill(dt: float) -> void:
 		renderer.burst(spill["p"], spill["col"], 2, 2.2, 0.06, 0.8, 9.0)
 	if spill_timer <= 0.0:
 		state = State.GAMEOVER
-		ui.show_game_over(REASONS.get(last_reason, "The water spilled."), score, height, best, new_best, difficulty)
+		ui.show_game_over(REASONS.get(last_reason, "The water spilled."), score, height, best, new_best)
 
 
 func _ensure_rows() -> void:
@@ -355,11 +361,11 @@ func _ensure_rows() -> void:
 # --- rules & scoring ---------------------------------------------------------------------
 
 func height_speed() -> float:
-	return minf(Tuning.MAX_SPEED, 1.0 + height * Tuning.SPEEDUP_PER_ROW)
+	return 1.0 + mini(height, Tuning.SPEEDUP_MAX_ROW) * Tuning.SPEEDUP_PER_ROW
 
 
 func effective_speed() -> float:
-	var s := height_speed() * float(Tuning.DIFFICULTY_SPEED.get(difficulty, 1.0))
+	var s := height_speed()
 	if speed_held():
 		s *= Tuning.HOLD_SPEED_MULT
 	if fast_forward:
@@ -370,8 +376,8 @@ func effective_speed() -> float:
 
 
 ## The score is simple: +SCORE_TUBE for every tube the water fills (a cross
-## filled both ways is two tubes) and +SCORE_ROW for every new row it reaches.
-## No multipliers or bonuses.
+## filled both ways is two tubes), x HOLD_SCORE_MULT while the player holds to
+## speed up. Climbing rows gives no points of its own.
 func add_points(n: int) -> void:
 	score += n
 
@@ -399,16 +405,15 @@ func _handle_event(e: Dictionary) -> void:
 			var t: Tile = e["tile"]
 			if t.kind == Tile.SOURCE:
 				return
-			add_points(Tuning.SCORE_TUBE)
+			# Holding to speed up doubles the points for every tube.
+			add_points(Tuning.SCORE_TUBE * (Tuning.HOLD_SCORE_MULT if speed_held() else 1))
 			sfx.play("tick", 0.92 + randf() * 0.16 + minf(0.5, height * 0.004), -5.0)
 		"blocked":
 			_game_over(e)
 
 
-## New best height: +SCORE_ROW per new row, and the milestone powers every 100 rows.
+## New best height: the milestone powers every 100 rows.
 func _set_height(r: int) -> void:
-	if r > height:
-		add_points((r - height) * Tuning.SCORE_ROW)
 	height = r
 	while height >= _next_award_row:
 		freezes += 1
@@ -488,7 +493,7 @@ func _game_over(e: Dictionary) -> void:
 	if score > best and not ai_used:
 		best = score
 		new_best = true
-		SaveData.save_best(best, difficulty)
+		SaveData.save_best(best)
 
 
 # --- placement ------------------------------------------------------------------------------
@@ -656,22 +661,6 @@ func speed_held() -> bool:
 	return ai_hold or ((hold_down or hold_key) and time - hold_since >= Tuning.HOLD_DELAY)
 
 
-## The AI SOLVE button: hand the board to the AI player, or take it back.
-func toggle_ai() -> void:
-	if (state != State.COUNTDOWN and state != State.RUNNING) or mode != "unlock":
-		return
-	ai.set_enabled(not ai.enabled)
-	_clear_hand()
-	if ai.enabled:
-		ai_used = true
-		if tutorial.active:
-			tutorial.finish()
-		ui.show_toast("AI IS PLAYING", Color("9dff8a"))
-	else:
-		ui.show_toast("YOUR TURN", Color.WHITE)
-	sfx.play("click")
-
-
 func on_pointer_press(pos: Vector2, touch := false) -> void:
 	if state != State.COUNTDOWN and state != State.RUNNING or paused:
 		return
@@ -707,8 +696,10 @@ func move_cursor(dx: int, dy: int) -> void:
 
 func on_confirm() -> void:
 	match state:
-		State.TITLE, State.GAMEOVER:
+		State.TITLE:
 			start_run()
+		State.GAMEOVER:
+			play_again()
 		State.COUNTDOWN, State.RUNNING:
 			if paused:
 				toggle_pause()
@@ -721,7 +712,9 @@ func on_confirm() -> void:
 
 
 func restart_key() -> void:
-	if state == State.TITLE or state == State.GAMEOVER or paused:
+	if state == State.GAMEOVER or paused:
+		play_again()
+	elif state == State.TITLE:
 		start_run()
 
 
@@ -838,9 +831,7 @@ func _compute_layout() -> void:
 				_slots.append(Rect2(x + (i % 2) * (s1 + 6.0), y + (i / 2) * (s1 + 6.0), s1, s1))
 			x += s0 + 12.0
 		var mid_w := maxf(0.0, freeze_rect.position.x - 10.0 - x)
-		var ai_h := 32.0
-		stats_rect = Rect2(x, queue_rect.position.y + 8.0, mid_w, queue_rect.size.y - 20.0 - ai_h)
-		ai_rect = Rect2(x, stats_rect.end.y + 6.0, mid_w, ai_h)
+		stats_rect = Rect2(x, queue_rect.position.y + 10.0, mid_w, queue_rect.size.y - 20.0)
 	else:
 		# Board on the left, a panel on the right:
 		# HAND (or the queue), height + score, then the power buttons.
@@ -857,10 +848,7 @@ func _compute_layout() -> void:
 		var y := queue_rect.position.y + 40.0
 		# Power buttons: two big full-width buttons at the bottom of the panel.
 		var ph := 112.0 if tall else 60.0
-		var ai_h := 46.0 if tall else 38.0
 		var bottom := queue_rect.end.y - 12.0
-		ai_rect = Rect2(queue_rect.position.x + 12.0, bottom - ai_h, panel_w - 24.0, ai_h)
-		bottom = ai_rect.position.y - 12.0
 		reveal_rect = Rect2(queue_rect.position.x + 12.0, bottom - ph, panel_w - 24.0, ph)
 		freeze_rect = Rect2(reveal_rect.position.x, reveal_rect.position.y - 16.0 - ph, panel_w - 24.0, ph)
 		var stats_h := 136.0 if tall else 100.0

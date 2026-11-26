@@ -1,23 +1,18 @@
 ## High score storage: localStorage in the browser, a config file elsewhere.
-## One best score per difficulty. The keys are new with the +1 per tube /
-## +3 per row scoring, so records from the old, bonus-based scoring (stored
-## under "upstream_best") don't carry over.
+## One best score. It keeps the key the Medium difficulty used (difficulties
+## are gone and the game runs at that speed), so that record carries over;
+## scores from the old bonus-based scoring ("upstream_best") don't.
 ## Every access is guarded, so a blocked or broken store never crashes the game.
 class_name SaveData
 extends RefCounted
 
-const KEY := "upstream_score"
+const KEY := "upstream_score_medium"   ## localStorage key.
+const CFG_KEY := "score_medium"        ## Config-file key (section "scores").
 const PATH := "user://upstream.cfg"
 
 
-## localStorage key and config-file key for a difficulty.
-static func _keys(difficulty: String) -> Array:
-	var d := difficulty if difficulty != "" else "medium"
-	return ["%s_%s" % [KEY, d], "score_%s" % d]
-
-
-static func load_best(difficulty := "medium") -> int:
-	var k := _keys(difficulty)
+static func load_best() -> int:
+	var k := [KEY, CFG_KEY]
 	var best := 0
 	if OS.has_feature("web"):
 		var v = JavaScriptBridge.eval(
@@ -32,8 +27,8 @@ static func load_best(difficulty := "medium") -> int:
 	return best
 
 
-static func save_best(score: int, difficulty := "medium") -> void:
-	var k := _keys(difficulty)
+static func save_best(score: int) -> void:
+	var k := [KEY, CFG_KEY]
 	if OS.has_feature("web"):
 		JavaScriptBridge.eval(
 				"(function(){try{window.localStorage.setItem('%s','%d');}catch(e){}})()" % [k[0], score], true)

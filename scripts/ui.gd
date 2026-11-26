@@ -248,7 +248,10 @@ class SpeedBadge:
 		var f := PipeArt.font()
 		var fs := int(size.y * 0.46)
 		var tx := x + h * 2.3
-		draw_string(f, Vector2(tx, size.y * 0.5 + fs * 0.36), "FAST x%d" % int(Tuning.HOLD_SPEED_MULT), HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 8.0, fs, Color.WHITE)
+		var txt := "FAST x%d" % int(Tuning.HOLD_SPEED_MULT)
+		draw_string(f, Vector2(tx, size.y * 0.5 + fs * 0.36), txt, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 8.0, fs, Color.WHITE)
+		var tw := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string(f, Vector2(tx + tw + 12.0, size.y * 0.5 + fs * 0.36), "%dx POINTS" % Tuning.HOLD_SCORE_MULT, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - tw - 18.0, fs, Color("ffc928"))
 
 
 var game  ## The Game node (main.gd).
@@ -260,19 +263,15 @@ var stat_plates := {}     ## "HEIGHT" / "SCORE" -> StatPlate behind them.
 var _stats_key := ""
 var btn_freeze: IconButton
 var btn_reveal: IconButton
-var btn_ai: Button
 var speed_badge: SpeedBadge
 var banner: Label
 var toast: Label
 var title_screen: Control
-var new_game_button: Button   ## The MEDIUM button (Enter also starts the last difficulty).
-var difficulty_buttons := {}  ## "easy" / "medium" / "hard" -> Button.
-var best_labels := {}         ## "easy" / "medium" / "hard" -> best-score Label on the menu.
+var new_game_button: Button
+var watch_ai_button: Button    ## Small: starts a game the AI plays.
+var best_label: Label         ## The best score on the menu, above the nameplate.
 var _title_box: VBoxContainer
-var _diff_col: VBoxContainer
 var _best_caption: Label
-var _best_names: Array = []   ## Difficulty-name Labels over the best scores.
-var _best_row: HBoxContainer
 var logo: StationLogo
 var pause_screen: Control
 var pause_mute: Button
@@ -511,11 +510,6 @@ func _build_hud() -> void:
 			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 		b.visible = false
 		root.add_child(b)
-	# AI SOLVE: hands the board to the AI player (and back).
-	btn_ai = _button("AI SOLVE", func(): game.toggle_ai(), 100)
-	btn_ai.visible = false
-	root.add_child(btn_ai)
-	_style_ai(false)
 	speed_badge = SpeedBadge.new()
 	speed_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	speed_badge.visible = false
@@ -543,55 +537,32 @@ func _build_title() -> void:
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	title_screen.add_child(backdrop)
 	title_screen.move_child(backdrop, 0)
-	# A simple menu: best scores, the name, and one button per difficulty.
+	# A simple menu: the best score, the name, and NEW GAME.
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 28)
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_center_of(title_screen).add_child(vb)
 	_title_box = vb
-	var trims := {"easy": WATER, "medium": HAZARD, "hard": Color("ff6a3a")}
-	# Best score per difficulty, above the nameplate.
 	var best_box := VBoxContainer.new()
-	best_box.add_theme_constant_override("separation", 2)
+	best_box.add_theme_constant_override("separation", -4)
 	best_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	best_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	vb.add_child(best_box)
-	_best_caption = _label("BEST SCORES", 15, Color("8fb8cc"), 4)
+	_best_caption = _label("BEST SCORE", 15, Color("ffc928"), 4)
 	best_box.add_child(_best_caption)
-	_best_row = HBoxContainer.new()
-	_best_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_best_row.add_theme_constant_override("separation", 40)
-	_best_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	best_box.add_child(_best_row)
-	for d in Tuning.DIFFICULTIES:
-		var col := VBoxContainer.new()
-		col.add_theme_constant_override("separation", -4)
-		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var nm := _label(String(d).to_upper(), 13, trims[d], 4)
-		col.add_child(nm)
-		_best_names.append(nm)
-		var v := _label("0", 28, Color.WHITE, 6)
-		col.add_child(v)
-		best_labels[d] = v
-		_best_row.add_child(col)
+	best_label = _label("0", 34, Color.WHITE, 6)
+	best_box.add_child(best_label)
 	logo = StationLogo.new()
 	logo.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	vb.add_child(logo)
-	# One button per difficulty, in a column: EASY (slow water), MEDIUM, HARD (fast water).
-	_diff_col = VBoxContainer.new()
-	_diff_col.alignment = BoxContainer.ALIGNMENT_CENTER
-	_diff_col.add_theme_constant_override("separation", 14)
-	_diff_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_diff_col.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	vb.add_child(_diff_col)
-	for d in Tuning.DIFFICULTIES:
-		var diff: String = d
-		var b := _button(diff.to_upper(), func(): game.start_run(diff), 200)
-		var trim: Color = trims[diff]
-		_style_button(b, STEEL, trim)
-		_diff_col.add_child(b)
-		difficulty_buttons[diff] = b
-	new_game_button = difficulty_buttons["medium"]
+	new_game_button = _button("NEW GAME", func(): game.start_run(), 300)
+	new_game_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_style_button(new_game_button, STEEL, HAZARD)
+	vb.add_child(new_game_button)
+	watch_ai_button = _button("WATCH AI", func(): game.start_run(true), 200)
+	watch_ai_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_style_button(watch_ai_button, Color("1d3a1f"), Color("5fbf55"))
+	vb.add_child(watch_ai_button)
 
 
 func _build_pause() -> void:
@@ -603,7 +574,7 @@ func _build_pause() -> void:
 	panel.add_child(vb)
 	vb.add_child(_slabel("PAUSED", 64, WATER.lightened(0.3), 14))
 	vb.add_child(_kbutton("RESUME  (P)", "RESUME", func(): game.toggle_pause()))
-	vb.add_child(_kbutton("RESTART  (R)", "RESTART", func(): game.start_run()))
+	vb.add_child(_kbutton("RESTART  (R)", "RESTART", func(): game.play_again()))
 	pause_mute = _button("SOUND: ON  (M)", func(): game.toggle_mute())
 	vb.add_child(pause_mute)
 	vb.add_child(_button("MAIN MENU", func(): game.go_to_title()))
@@ -632,15 +603,14 @@ func _build_over() -> void:
 	sp.mouse_filter = Control.MOUSE_FILTER_IGNORE  # Spacers must not swallow taps.
 	sp.custom_minimum_size = Vector2(0, 8)
 	vb.add_child(sp)
-	vb.add_child(_button("PLAY AGAIN", func(): game.start_run()))
+	vb.add_child(_button("PLAY AGAIN", func(): game.play_again()))
 	vb.add_child(_button("MAIN MENU", func(): game.go_to_title()))
 
 
 # --- screens --------------------------------------------------------------------------------
 
 func show_title(_best: int = 0) -> void:
-	for d in best_labels:
-		_set_text(best_labels[d], "%d" % SaveData.load_best(d))
+	_set_text(best_label, "%d" % SaveData.load_best())
 	title_screen.visible = true
 	pause_screen.visible = false
 	over_screen.visible = false
@@ -658,12 +628,12 @@ func show_pause(p: bool) -> void:
 	pause_screen.visible = p
 
 
-func show_game_over(reason: String, score: int, height: int, best: int, is_new: bool, difficulty := "medium") -> void:
+func show_game_over(reason: String, score: int, height: int, best: int, is_new: bool) -> void:
 	over_reason.text = reason
 	over_reason.visible = reason != ""
 	over_score.text = "%d" % score
 	over_height.text = "HEIGHT  %d rows" % height
-	over_best.text = "%s BEST  %d" % [difficulty.to_upper(), best]
+	over_best.text = "BEST  %d" % best
 	over_new.visible = is_new
 	over_screen.visible = true
 	over_screen.modulate.a = 0.0
@@ -813,41 +783,18 @@ func _refresh_powers() -> void:
 	if btn_freeze.lit != lit:
 		btn_freeze.lit = lit
 		btn_freeze.queue_redraw()
-	# AI button below the powers.
-	var show_ai: bool = shown and game.mode == "unlock"
-	if btn_ai.visible != show_ai:
-		btn_ai.visible = show_ai
-	if show_ai:
-		var ar: Rect2 = game.ai_rect
-		if btn_ai.position != ar.position or btn_ai.size != ar.size:
-			btn_ai.custom_minimum_size = Vector2.ZERO
-			btn_ai.position = ar.position
-			btn_ai.size = ar.size
-			btn_ai.add_theme_font_size_override("font_size", int(clampf(ar.size.y * 0.46, 14.0, 22.0)))
-		var on: bool = game.ai.enabled
-		var txt := "STOP AI" if on else "AI SOLVE"
-		if btn_ai.text != txt:
-			btn_ai.text = txt
-			_style_ai(on)
 	# FAST badge while the water is sped up.
 	var fast: bool = game.speed_held()
 	if speed_badge.visible != fast:
 		speed_badge.visible = fast
 	if fast:
 		var b: Rect2 = game.board_rect
-		var sz := Vector2(150, 34)
+		var sz := Vector2(260, 34)
 		var y := b.position.y + 10.0
 		if game.tutorial.active and game.tutorial.visible:
 			y = game.tutorial._panel.get_global_rect().end.y + 8.0
 		speed_badge.position = Vector2(roundf(b.get_center().x - sz.x * 0.5), y)
 		speed_badge.size = sz
-
-
-func _style_ai(on: bool) -> void:
-	var trim := Color("7dff6a") if on else Color("5fbf55")
-	var bg := Color("1d3a1f") if on else STEEL_DARK
-	_style_button(btn_ai, bg, trim)
-	btn_ai.add_theme_color_override("font_color", Color("d9ffd2") if on else Color.WHITE)
 
 
 func _apply_layout() -> void:
@@ -861,28 +808,24 @@ func _apply_layout() -> void:
 		l.add_theme_constant_override("outline_size", maxi(2, int(e[2] * k)))
 	for e in _key_buttons:
 		(e[0] as Button).text = e[2] if touch else e[1]
-	# Menu: best scores, nameplate and a column of three buttons must fit.
+	# Menu: best score, nameplate, NEW GAME and the small WATCH AI must fit.
 	var short := vs.y < 600.0
-	var bh := 52.0 if short else 74.0
+	var bh := 56.0 if short else 74.0
 	var bw := minf(320.0, vs.x - 64.0)
-	var gap := 10.0 if short else 14.0
-	var sep := 16.0 if short else 28.0
+	var sep := 16.0 if short else 26.0
 	_title_box.add_theme_constant_override("separation", int(sep))
-	_diff_col.add_theme_constant_override("separation", int(gap))
 	_best_caption.add_theme_font_size_override("font_size", 13 if short else 17)
-	for nm in _best_names:
-		(nm as Label).add_theme_font_size_override("font_size", 12 if short else 15)
-	for d in best_labels:
-		(best_labels[d] as Label).add_theme_font_size_override("font_size", 22 if short else 34)
-	var best_h := 62.0 if short else 86.0
-	var used := 3.0 * bh + 2.0 * gap + 2.0 * sep + best_h + 70.0
-	logo.fit_width(vs.x - 24.0, maxf(60.0, minf(vs.y * (0.26 if short else 0.34), vs.y - used)))
+	best_label.add_theme_font_size_override("font_size", 26 if short else 36)
+	var best_h := 48.0 if short else 64.0
+	var ai_h := 40.0 if short else 46.0
+	var used := bh + ai_h + 3.0 * sep + best_h + 60.0
+	logo.fit_width(vs.x - 24.0, maxf(60.0, minf(vs.y * (0.3 if short else 0.36), vs.y - used)))
+	watch_ai_button.custom_minimum_size = Vector2(minf(220.0, bw * 0.7), ai_h)
+	watch_ai_button.add_theme_font_size_override("font_size", 18 if short else 20)
 	over_reason.custom_minimum_size = Vector2(minf(420.0, vs.x - 96.0), 0)
 	_stats_key = ""
-	var bfs := 26 if short else 32
-	for b in difficulty_buttons.values():
-		(b as Button).custom_minimum_size = Vector2(bw, bh)
-		(b as Button).add_theme_font_size_override("font_size", bfs)
+	new_game_button.custom_minimum_size = Vector2(bw, bh)
+	new_game_button.add_theme_font_size_override("font_size", 28 if short else 34)
 	banner.position = Vector2(0, -vs.y * 0.22)
 	banner.size = vs
 	toast.position = Vector2(20, -vs.y * 0.5 + game.hud_h + 40)

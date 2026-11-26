@@ -86,10 +86,7 @@ static func theme_for_row(r: int) -> Dictionary:
 	return theme(index_for_row(r))
 
 
-## "ZONE 2: FACTORY", and "ZONE 7: FACTORY II" on the second lap.
+## The zone banner: just the number, "ZONE 1" up to "ZONE 255" (the looks
+## still cycle through the five palettes).
 static func title(zone_index: int) -> String:
-	var lap := zone_index / count()
-	var suffix := ""
-	if lap > 0:
-		suffix = " " + "I".repeat(lap + 1) if lap < 3 else " +%d" % lap
-	return "ZONE %d: %s%s" % [zone_index + 1, theme(zone_index)["name"], suffix]
+	return "ZONE %d" % mini(zone_index + 1, 255)

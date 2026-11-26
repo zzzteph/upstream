@@ -97,28 +97,24 @@ func _run() -> void:
 	check(game.state == S.TITLE, "starts on the title screen")
 	check(game.ui.title_screen.visible, "title overlay visible")
 
-	# --- the menu: EASY / MEDIUM / HARD buttons; clicking elsewhere does nothing ---
+	# --- the menu: best score, NEW GAME and a small WATCH AI; clicking elsewhere does nothing ---
 	var screen := Rect2(Vector2.ZERO, game.view_size)
-	for d in Tuning.DIFFICULTIES:
-		var b: Button = game.ui.difficulty_buttons[d]
-		check(b.is_visible_in_tree() and screen.encloses(b.get_global_rect()), "the menu shows a %s button on screen" % d.to_upper())
+	var ng: Button = game.ui.new_game_button
+	var wa: Button = game.ui.watch_ai_button
+	check(ng.is_visible_in_tree() and screen.encloses(ng.get_global_rect()) and ng.text == "NEW GAME", "the menu shows NEW GAME on screen")
+	check(wa.is_visible_in_tree() and screen.encloses(wa.get_global_rect()) and wa.get_global_rect().position.y >= ng.get_global_rect().end.y
+			and wa.size.x < ng.size.x, "a smaller WATCH AI button sits under it")
+	check(not "difficulty_buttons" in game.ui and not "difficulty" in game, "no difficulty levels")
 	check(not (load("res://scripts/station_logo.gd") as Script).get_script_constant_map().has("SUBTITLE"), "the nameplate has no subtitle")
-	var be: Rect2 = (game.ui.difficulty_buttons["easy"] as Button).get_global_rect()
-	var bm: Rect2 = (game.ui.difficulty_buttons["medium"] as Button).get_global_rect()
-	var bhd: Rect2 = (game.ui.difficulty_buttons["hard"] as Button).get_global_rect()
-	check(is_equal_approx(be.get_center().x, bm.get_center().x) and is_equal_approx(bm.get_center().x, bhd.get_center().x)
-			and be.end.y <= bm.position.y and bm.end.y <= bhd.position.y, "EASY, MEDIUM and HARD are stacked in one column")
 	var logo_top: float = game.ui.logo.get_global_rect().position.y
-	for d in Tuning.DIFFICULTIES:
-		var bl: Label = game.ui.best_labels[d]
-		check(bl.is_visible_in_tree() and bl.get_global_rect().end.y <= logo_top and bl.text == "%d" % SaveData.load_best(d),
-				"the %s best score is shown above UPSTREAM" % d)
+	check(game.ui.best_label.is_visible_in_tree() and game.ui.best_label.get_global_rect().end.y <= logo_top
+			and game.ui.best_label.text == "%d" % SaveData.load_best(), "the best score is shown above UPSTREAM")
 	click(Vector2(game.view_size.x * 0.06, game.view_size.y * 0.5))
 	await frames(1)
 	check(game.state == S.TITLE, "clicking beside the buttons does not start a game")
 	click(game.ui.new_game_button.get_global_rect().get_center())
 	await frames(2)
-	check(game.state == S.COUNTDOWN and game.difficulty == "medium", "MEDIUM starts the countdown on medium")
+	check(game.state == S.COUNTDOWN and not game.ai.enabled, "NEW GAME starts the countdown, with you playing")
 	check(not game.ui.title_screen.visible, "title hidden")
 	check(game.countdown > 9.0, "10 second countdown")
 
@@ -183,7 +179,7 @@ func _run() -> void:
 	await frames(int(Tuning.COUNTDOWN_TIME * 60) + 5)
 	check(game.state == S.RUNNING and game.flow.active, "goo starts after the countdown")
 
-	# --- the cross loop in the safe rows: +1 per tube (both cross passes), +3 per row ---
+	# --- the cross loop in the safe rows: +1 per tube (both cross passes), nothing per row ---
 	game.start_run()
 	await frames(1)
 	for spec in [[3, 1, P.V], [3, 2, P.CROSS], [3, 3, P.SE], [4, 3, P.SW], [4, 2, P.NW], [2, 2, P.NE], [2, 3, P.V], [2, 4, P.V]]:
@@ -201,9 +197,9 @@ func _run() -> void:
 	var cross: Tile = game.grid.get_tile(3, 2)
 	check(cross.fill[0] == 1.0 and cross.fill[1] == 1.0, "cross filled both ways in game")
 	check(game.height == 4, "the loop climbs to row 4 (got %d)" % game.height)
-	var want: int = 9 * Tuning.SCORE_TUBE + 4 * Tuning.SCORE_ROW
-	check(Tuning.SCORE_TUBE == 1 and Tuning.SCORE_ROW == 3, "scoring is +1 per tube and +3 per row")
-	check(game.score == want, "loop score: 9 tubes x1 + 4 rows x3 = %d, fast-forward adds nothing (got %d)" % [want, game.score])
+	var want: int = 9 * Tuning.SCORE_TUBE
+	check(Tuning.SCORE_TUBE == 1 and not (load("res://scripts/tuning.gd") as Script).get_script_constant_map().has("SCORE_ROW"), "scoring is +1 per tube, nothing per row")
+	check(game.score == want, "loop score: 9 tubes x1 = %d; rows and fast-forward add nothing (got %d)" % [want, game.score])
 	check(game.last_reason == "empty", "spills on the empty tile (got %s)" % game.last_reason)
 	await frames(100)
 	check(game.state == S.GAMEOVER and game.ui.over_screen.visible, "game over screen shows")
@@ -232,9 +228,15 @@ func _run() -> void:
 		zones_seen[game.zone_index] = true
 	check(game.height >= target, "perfect play climbs to row %d (reached %d, %s)" % [target, game.height, game.last_reason])
 	check(zones_seen.size() >= 4, "passed through 4 zones (%d)" % zones_seen.size())
-	check(game.score >= game.height * Tuning.SCORE_ROW + game.height and game.score <= game.height * (Tuning.SCORE_ROW + 4),
-			"score is rows x3 plus tubes x1, with no multiplier (height %d, score %d)" % [game.height, game.score])
+	check(Zones.title(1) == "ZONE 2" and Zones.title(300) == "ZONE 255", "zone banners are just numbers, up to ZONE 255")
+	# flow.segments also counts the pump itself, which scores nothing.
+	check(game.score == (game.flow.segments - 1) * Tuning.SCORE_TUBE, "score is exactly the tubes filled, nothing per row (height %d, score %d, tubes %d)" % [game.height, game.score, game.flow.segments - 1])
 	check(game.height_speed() > 2.5, "flow speeds up with height (%.2fx)" % game.height_speed())
+	var h_was: int = game.height
+	for spec in [[0, 1.0], [100, 2.0], [200, 3.0], [300, 4.0], [450, 4.0]]:
+		game.height = spec[0]
+		check(is_equal_approx(game.height_speed(), spec[1]), "speed is +1%% per row up to row 300: row %d -> %.2fx (got %.2fx)" % [spec[0], spec[1], game.height_speed()])
+	game.height = h_was
 	check(peak_rows <= Tuning.KEEP_ROWS_BELOW + 40, "rows in memory stay bounded (peak %d)" % peak_rows)
 	check(game.grid.floor_row > 100, "old rows discarded (floor at %d)" % game.grid.floor_row)
 	print("long run: height %d, score %d" % [game.height, game.score])
@@ -252,6 +254,7 @@ func _run() -> void:
 
 	# --- unlock mode (BioShock-style) ---
 	game.mode = "unlock"
+	game.rng.seed = 2024  # A fixed board, so rows 1-3 surely hold both pipes and empty slots.
 	game.start_run()
 	await frames(1)
 	check(game.state == S.COUNTDOWN, "unlock mode starts")
@@ -333,29 +336,16 @@ func _run() -> void:
 	check(game.height >= 120, "unlock mode: autoplay climbs to row 120 (reached %d, %s)" % [game.height, game.last_reason])
 	print("unlock run: height %d, score %d, flips %d" % [game.height, game.score, game.flips])
 
-	# --- difficulty: EASY / MEDIUM / HARD scale the water's speed ---
-	var speeds := {"easy": 0.5, "medium": 1.0, "hard": 1.25}
-	for d in Tuning.DIFFICULTIES:
-		game.go_to_title()
-		await frames(1)
-		click((game.ui.difficulty_buttons[d] as Button).get_global_rect().get_center())
-		await frames(2)
-		check(game.state == S.COUNTDOWN and game.difficulty == d, "%s button starts a %s run" % [d.to_upper(), d])
-		game._start_flow()
-		check(is_equal_approx(game.effective_speed(), game.height_speed() * speeds[d]),
-				"%s: water at %.2fx of the base speed (got %.3f vs %.3f)" % [d, speeds[d], game.effective_speed(), game.height_speed()])
-		check(game.freezes == Tuning.START_POWERS and game.reveals == Tuning.START_POWERS,
-				"%s: the run starts with one Flow-freeze and one Reveal" % d)
-		check(game.ui.btn_freeze.visible and game.ui.btn_reveal.visible, "%s: power buttons are there from the start" % d)
+	# --- one speed for everyone; one best score ---
 	game.start_run()
 	await frames(1)
-	check(game.difficulty == "hard", "playing again keeps the difficulty")
-	check(SaveData._keys("hard") != SaveData._keys("medium") and SaveData._keys("easy") != SaveData._keys("medium")
-			and not "upstream_best" in SaveData._keys("medium"), "each difficulty keeps its own best score, on new keys")
-	SaveData.save_best(SaveData.load_best("hard") + 1, "hard")
-	check(SaveData.load_best("hard") > 0, "a hard best score saves and loads")
-	game.ui.show_game_over("", 10, 1, 20, false, "hard")
-	check(game.ui.over_best.text.begins_with("HARD BEST"), "game over names the difficulty of the best score")
+	game._start_flow()
+	check(is_equal_approx(game.effective_speed(), game.height_speed()), "the water runs at the base speed (no difficulty multiplier)")
+	check(game.freezes == Tuning.START_POWERS and game.reveals == Tuning.START_POWERS, "the run starts with one Flow-freeze and one Reveal")
+	check(game.ui.btn_freeze.visible and game.ui.btn_reveal.visible, "power buttons are there from the start")
+	check(SaveData.KEY == "upstream_score_medium", "the best score keeps the old Medium record")
+	game.ui.show_game_over("", 10, 1, 20, false)
+	check(game.ui.over_best.text == "BEST  20", "game over shows the best score")
 	game.ui.over_screen.visible = false
 
 	# --- height and score sit in the side panel; no top bar ---
@@ -424,7 +414,7 @@ func _run() -> void:
 
 	# --- hold to speed up ---
 	game.mode = "unlock"
-	game.start_run("medium")
+	game.start_run()
 	await frames(1)
 	game._start_flow()
 	var spot := Vector2(game.board_rect.position.x + 10.0, game.board_rect.end.y - 10.0)
@@ -438,13 +428,25 @@ func _run() -> void:
 	press_at(spot, false)
 	await frames(1)
 	check(not game.speed_held() and is_equal_approx(game.effective_speed(), game.height_speed()), "letting go slows it back down")
+	var tube := Tile.new()
+	tube.piece = P.V
+	var sc0: int = game.score
+	game._handle_event({"type": "filled", "tile": tube, "col": 0, "row": 1, "channel": 0})
+	check(game.score - sc0 == Tuning.SCORE_TUBE, "a tube scores +1 normally")
+	press_at(spot)
+	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
+	sc0 = game.score
+	game._handle_event({"type": "filled", "tile": tube, "col": 0, "row": 1, "channel": 0})
+	check(game.score - sc0 == Tuning.SCORE_TUBE * 2, "a tube scores 2x while you hold to speed up")
+	press_at(spot, false)
+	await frames(1)
 	key_state(KEY_F, true)
 	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
 	check(game.speed_held(), "holding F does the same on a keyboard")
 	key_state(KEY_F, false)
 	await frames(1)
 	check(not game.speed_held(), "releasing F slows it back down")
-	game.start_run("medium")
+	game.start_run()
 	await frames(1)
 	var cd0: float = game.countdown
 	press_at(spot)
@@ -455,7 +457,7 @@ func _run() -> void:
 	# --- first-run walkthrough, on a prepared board ---
 	var tut = game.tutorial
 	game.tutorial_pending = true
-	game.start_run("medium")
+	game.start_run()
 	await frames(2)
 	check(tut.active and tut.visible, "the walkthrough starts on the first game")
 	check(not tut._ok.visible, "no buttons on the doing-steps: you do the thing")
@@ -501,9 +503,7 @@ func _run() -> void:
 	await frames(1)
 	check(tut.step == tut.Step.POWERS, "walkthrough 7: holding the screen moves on")
 	check(tut._text.text.contains("%d seconds" % int(Tuning.FREEZE_TIME)) and tut._text.text.contains("%d rows" % Tuning.POWER_AWARD_ROWS), "the powers text gives the real numbers")
-	click(tut._ok.get_global_rect().get_center())
-	await frames(1)
-	check(tut.step == tut.Step.AI, "walkthrough 8: AI SOLVE")
+	check(tut._ok.text == "LET'S GO", "the powers are the last step")
 	click(tut._ok.get_global_rect().get_center())
 	await frames(1)
 	check(not tut.active and not game.tutorial_pending and SaveData.load_flag("tutorial_done"), "walkthrough done, and saved so it won't show again")
@@ -516,21 +516,23 @@ func _run() -> void:
 		await frames(1)
 		guard += 1
 	check(slot_t.fill[0] >= 1.0, "the water really flows up through the pipe placed in the walkthrough")
-	game.start_run("medium")
+	game.start_run()
 	await frames(1)
 	check(not tut.active and not game.gen.tutorial_start, "the next game is a normal, unprepared one")
 	check(not "_skip" in tut, "the walkthrough has no SKIP button")
 
-	# --- AI SOLVE: a bot that plans routes and plays through taps, at a human pace ---
+	# --- WATCH AI: a bot that plans routes and plays through taps, at a human pace ---
 	seed(4242)
 	game.rng.seed = 4242
-	game.start_run("medium")
-	await frames(2)
-	check(game.ui.btn_ai.visible and Rect2(Vector2.ZERO, game.view_size).encloses(game.ui.btn_ai.get_global_rect()), "the AI SOLVE button is on screen")
-	var best_before := SaveData.load_best("medium")
-	click(game.ui.btn_ai.get_global_rect().get_center())
+	game.tutorial_pending = true  # A WATCH AI game never shows the walkthrough.
+	game.go_to_title()
 	await frames(1)
-	check(game.ai.enabled and game.ui.btn_ai.text == "STOP AI", "AI SOLVE hands the board to the AI")
+	var best_before := SaveData.load_best()
+	click(game.ui.watch_ai_button.get_global_rect().get_center())
+	await frames(2)
+	check(game.state == S.COUNTDOWN and game.ai.enabled and not game.tutorial.active and not game.gen.tutorial_start,
+			"WATCH AI starts a game the AI plays (no walkthrough, normal board)")
+	game.tutorial_pending = false
 	click(tile_center(0, 2))
 	await frames(1)
 	check(game.grid.get_tile(0, 2).hidden, "your taps on the board are ignored while the AI plays")
@@ -579,13 +581,19 @@ func _run() -> void:
 	else:
 		check(false, "found a pipe on the AI's route to break")
 	if game.state != S.GAMEOVER:
-		click(game.ui.btn_ai.get_global_rect().get_center())
-		await frames(1)
-		check(not game.ai.enabled and game.ui.btn_ai.text == "AI SOLVE", "STOP AI hands the board back")
 		game.score = best_before + 1000
 		game._game_over({"reason": "rock", "col": 3, "row": game.flow.row, "exit": Pieces.N})
 		await frames(120)
-	check(SaveData.load_best("medium") == best_before, "a run the AI played doesn't set a best score")
+	check(SaveData.load_best() == best_before, "a run the AI played doesn't set a best score")
+	game.play_again()
+	await frames(1)
+	check(game.ai.enabled, "PLAY AGAIN after a WATCH AI game watches again")
+	game.go_to_title()
+	await frames(1)
+	check(not game.ai.enabled, "back on the menu the AI stops")
+	game.start_run()
+	await frames(1)
+	check(not game.ai.enabled, "NEW GAME is yours to play")
 
 	# --- frame cost ---
 	var total := 0.0

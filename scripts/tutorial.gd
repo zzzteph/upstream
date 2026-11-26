@@ -10,9 +10,8 @@
 ##   3. pick the pipe up
 ##   4. put it in the slot above the pump (now the water has a way up)
 ##   5. how the water flows               (OK)
-##   6. hold to speed up                  (hold, or OK)
-##   7. Freeze and Reveal                 (OK)
-##   8. AI SOLVE                          (OK)
+##   6. hold to speed up (2x points)      (hold, or OK)
+##   7. Freeze and Reveal                 (LET'S GO)
 ##
 ## Steps 1-4 follow the board itself, so they stay right whatever the player
 ## taps in between (a wrong pipe picked up is put back first). A coach panel at
@@ -23,7 +22,7 @@
 class_name Tutorial
 extends Control
 
-enum Step { FIRST_PIPE, FLOW, SPEED, POWERS, AI }
+enum Step { FIRST_PIPE, FLOW, SPEED, POWERS }
 
 const HAZARD := Color("ffc928")
 const SHADE := Color(0.0, 0.01, 0.02, 0.66)   ## The dimmed background around the spotlight.
@@ -84,7 +83,7 @@ func stop() -> void:
 	visible = false
 
 
-## Done (or the AI took over): never show it again.
+## Done: never show it again.
 func finish() -> void:
 	active = false
 	visible = false
@@ -99,8 +98,6 @@ func _next() -> void:
 		Step.SPEED:
 			_go(Step.POWERS)
 		Step.POWERS:
-			_go(Step.AI)
-		Step.AI:
 			finish()
 			game.ui.show_toast("GOOD LUCK!", HAZARD)
 
@@ -109,7 +106,7 @@ func _go(s: int) -> void:
 	step = s
 	_held_for = 0.0
 	_ok.visible = s != Step.FIRST_PIPE
-	_ok.text = "LET'S GO" if s == Step.AI else "OK"
+	_ok.text = "LET'S GO" if s == Step.POWERS else "OK"
 
 
 ## The slot above the pump takes the water straight up?
@@ -184,7 +181,7 @@ func _process(dt: float) -> void:
 			_target = game.renderer.tile_rect(SLOT.x, SLOT.y).merge(game.renderer.tile_rect(SLOT.x, 0))
 		Step.SPEED:
 			var hold := "Hold your finger on the screen" if game.is_touch else "Hold the mouse button down (or the F key)"
-			_set_text("%s to speed the water up x%d. Let go to slow it down again." % [hold, int(Tuning.HOLD_SPEED_MULT)])
+			_set_text("%s to speed the water up x%d. Every tube scores %dx while you hold. Let go to slow it down again." % [hold, int(Tuning.HOLD_SPEED_MULT), Tuning.HOLD_SCORE_MULT])
 			_target = b  # Hold anywhere on the board.
 			if game.speed_held():
 				_held_for += dt
@@ -193,9 +190,6 @@ func _process(dt: float) -> void:
 		Step.POWERS:
 			_set_text("FREEZE stops the water for %d seconds. REVEAL opens every hatch on screen. You start with one of each and get another every %d rows." % [int(Tuning.FREEZE_TIME), Tuning.POWER_AWARD_ROWS])
 			_target = game.freeze_rect.merge(game.reveal_rect)
-		Step.AI:
-			_set_text("Stuck? AI SOLVE plays for you. %s it again to take over." % ("Tap" if game.is_touch else "Click"))
-			_target = game.ai_rect
 	_place_panel()
 	queue_redraw()
 
