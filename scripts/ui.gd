@@ -180,6 +180,31 @@ class IconButton:
 			ci.draw_line(ec + d * r * 0.62, ec + d * r * 0.84, Color("ffe7a0"), maxf(2.0, r * 0.09), true)
 
 
+## "▶▶ FAST x4" shown at the top of the board while the water is sped up.
+class SpeedBadge:
+	extends Control
+
+	func _draw() -> void:
+		var r := Rect2(Vector2.ZERO, size)
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.05, 0.07, 0.09, 0.85)
+		sb.border_color = Color("ffc928")
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(int(size.y * 0.5))
+		sb.anti_aliasing = true
+		draw_style_box(sb, r)
+		var h := size.y * 0.42
+		var x := size.y * 0.45
+		for i in 2:
+			var ox := x + i * h * 0.75
+			draw_colored_polygon(PackedVector2Array([Vector2(ox, size.y * 0.5 - h * 0.5), Vector2(ox + h * 0.7, size.y * 0.5),
+					Vector2(ox, size.y * 0.5 + h * 0.5)]), Color("ffc928"))
+		var f := PipeArt.font()
+		var fs := int(size.y * 0.46)
+		var tx := x + h * 2.3
+		draw_string(f, Vector2(tx, size.y * 0.5 + fs * 0.36), "FAST x%d" % int(Tuning.HOLD_SPEED_MULT), HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 8.0, fs, Color.WHITE)
+
+
 var game  ## The Game node (main.gd).
 var root: Control
 var hud: Control
@@ -188,6 +213,8 @@ var stat_captions := {}   ## "HEIGHT" / "SCORE" -> caption Label.
 var _stats_key := ""
 var btn_freeze: IconButton
 var btn_reveal: IconButton
+var btn_ai: Button
+var speed_badge: SpeedBadge
 var banner: Label
 var toast: Label
 var title_screen: Control
@@ -404,6 +431,15 @@ func _build_hud() -> void:
 			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 		b.visible = false
 		root.add_child(b)
+	# AI SOLVE: hands the board to the AI player (and back).
+	btn_ai = _button("AI SOLVE", func(): game.toggle_ai(), 100)
+	btn_ai.visible = false
+	root.add_child(btn_ai)
+	_style_ai(false)
+	speed_badge = SpeedBadge.new()
+	speed_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	speed_badge.visible = false
+	root.add_child(speed_badge)
 
 
 func _build_center_labels() -> void:
@@ -633,15 +669,29 @@ func _place_stats() -> void:
 			cell = Rect2(r.position.x + i * r.size.x * 0.5, r.position.y, r.size.x * 0.5, r.size.y)
 		else:
 			cell = Rect2(r.position.x, r.position.y + i * r.size.y * 0.5, r.size.x, r.size.y * 0.5)
-		var val_fs := int(clampf(minf(cell.size.y * 0.5, cell.size.x * 0.24), 16.0, 40.0))
-		var cap_fs := int(clampf(val_fs * 0.45, 11.0, 16.0))
-		var top := cell.position.y + cell.size.y * 0.5 - (cap_fs + val_fs) * 0.62
-		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		cap.position = Vector2(cell.position.x, top)
-		cap.size = Vector2(cell.size.x, cap_fs * 1.3)
-		val.position = Vector2(cell.position.x, top + cap_fs * 1.05)
-		val.size = Vector2(cell.size.x, val_fs * 1.3)
+		var val_fs: int
+		var cap_fs: int
+		if game.portrait and r.size.x < 170.0:
+			# Narrow bar column: one row each, caption left and number right.
+			val_fs = int(clampf(minf(cell.size.y * 0.6, cell.size.x * 0.2), 14.0, 28.0))
+			cap_fs = int(clampf(val_fs * 0.5, 11.0, 14.0))
+			var row := Rect2(cell.position.x + 8.0, cell.position.y, maxf(0.0, cell.size.x - 16.0), cell.size.y)
+			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+			val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			cap.position = row.position
+			cap.size = row.size
+			val.position = row.position
+			val.size = row.size
+		else:
+			val_fs = int(clampf(minf(cell.size.y * 0.5, cell.size.x * 0.24), 16.0, 40.0))
+			cap_fs = int(clampf(val_fs * 0.45, 11.0, 16.0))
+			var top := cell.position.y + cell.size.y * 0.5 - (cap_fs + val_fs) * 0.62
+			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cap.position = Vector2(cell.position.x, top)
+			cap.size = Vector2(cell.size.x, cap_fs * 1.3)
+			val.position = Vector2(cell.position.x, top + cap_fs * 1.05)
+			val.size = Vector2(cell.size.x, val_fs * 1.3)
 		cap.add_theme_font_size_override("font_size", cap_fs)
 		val.add_theme_font_size_override("font_size", val_fs)
 		val.add_theme_constant_override("outline_size", maxi(3, val_fs / 5))
@@ -669,6 +719,43 @@ func _refresh_powers() -> void:
 	if btn_freeze.lit != lit:
 		btn_freeze.lit = lit
 		btn_freeze.queue_redraw()
+	# AI button below the powers.
+	var show_ai: bool = shown and game.mode == "unlock"
+	if btn_ai.visible != show_ai:
+		btn_ai.visible = show_ai
+	if show_ai:
+		var ar: Rect2 = game.ai_rect
+		if btn_ai.position != ar.position or btn_ai.size != ar.size:
+			btn_ai.custom_minimum_size = Vector2.ZERO
+			btn_ai.position = ar.position
+			btn_ai.size = ar.size
+			btn_ai.add_theme_font_size_override("font_size", int(clampf(ar.size.y * 0.46, 14.0, 22.0)))
+		var on: bool = game.ai.enabled
+		var txt := "STOP AI" if on else "AI SOLVE"
+		if btn_ai.text != txt:
+			btn_ai.text = txt
+			_style_ai(on)
+	# FAST badge while the water is sped up.
+	var fast: bool = game.speed_held()
+	if speed_badge.visible != fast:
+		speed_badge.visible = fast
+	if fast:
+		var b: Rect2 = game.board_rect
+		var sz := Vector2(150, 34)
+		var y := b.position.y + 10.0
+		if game.tutorial.active and game.tutorial.visible:
+			y = game.tutorial._panel.get_global_rect().end.y + 8.0
+		speed_badge.position = Vector2(roundf(b.get_center().x - sz.x * 0.5), y)
+		speed_badge.size = sz
+
+
+func _style_ai(on: bool) -> void:
+	var trim := Color("7dff6a") if on else Color("5fbf55")
+	var bg := Color("1d3a1f") if on else STEEL_DARK
+	btn_ai.add_theme_stylebox_override("normal", _box(bg, trim, 10, 3, 4))
+	btn_ai.add_theme_stylebox_override("hover", _box(bg.lightened(0.1), trim.lightened(0.3), 10, 3, 4))
+	btn_ai.add_theme_stylebox_override("pressed", _box(bg.darkened(0.3), trim, 10, 3, 0))
+	btn_ai.add_theme_color_override("font_color", Color("d9ffd2") if on else Color.WHITE)
 
 
 func _apply_layout() -> void:

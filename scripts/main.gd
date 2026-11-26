@@ -63,6 +63,17 @@ var freeze_timer := 0.0            ## Time left on a running freeze.
 var freeze_started := -100.0       ## Game time the current freeze began.
 var _next_award_row := Tuning.POWER_AWARD_ROWS
 var flips := 0
+var drops := 0                     ## Pipes put down this run (unlock mode).
+# Hold to speed up: a press that lasts HOLD_DELAY (finger, mouse button or F).
+var hold_down := false
+var hold_since := 0.0
+var hold_key := false
+var ai_hold := false               ## The AI player is "holding" the screen.
+# AI player and first-run walkthrough
+var ai: AIPlayer
+var tutorial: Tutorial
+var tutorial_pending := false      ## Show the walkthrough at the next run (first game ever).
+var ai_used := false               ## The AI played part of this run: no best score.
 var alarms := 0
 
 # Layout, in virtual pixels (720 on the short side).
@@ -75,6 +86,7 @@ var board_rect := Rect2()
 var queue_rect := Rect2()
 var stats_rect := Rect2()    ## Height and score, inside the panel.
 var freeze_rect := Rect2()   ## Milestone power buttons (shown while playing).
+var ai_rect := Rect2()       ## The AI SOLVE toggle, below the power buttons.
 var reveal_rect := Rect2()
 var _slots: Array = []
 
@@ -113,7 +125,16 @@ func _ready() -> void:
 	ui.game = self
 	add_child(ui)
 	best = SaveData.load_best(difficulty)
+	ai = AIPlayer.new()
+	ai.game = self
+	add_child(ai)
+	tutorial = Tutorial.new()
+	tutorial.game = self
+	ui.root.add_child(tutorial)
+	tutorial_pending = not SaveData.load_flag("tutorial_done")
 	_read_debug_flags()
+	if debug_autoplay:
+		tutorial_pending = false
 	_compute_layout()
 	new_board(rng.randi())
 	state = State.TITLE
@@ -163,7 +184,11 @@ func new_board(seed_value: int) -> void:
 	freeze_started = -100.0
 	_next_award_row = Tuning.POWER_AWARD_ROWS
 	flips = 0
+	drops = 0
 	alarms = 0
+	hold_down = false
+	hold_key = false
+	ai_hold = false
 	flow.reset()
 	if renderer:
 		renderer.clear_fx()
@@ -201,12 +226,21 @@ func start_run(diff := "") -> void:
 		reveals = 3
 	paused = false
 	state = State.COUNTDOWN
+	if ai != null and ai.enabled:
+		ai.set_enabled(false)
+	ai_used = false
 	ui.show_play()
 	sfx.play("click")
+	if tutorial_pending and mode == "unlock":
+		tutorial.start()
 
 
 func go_to_title() -> void:
 	paused = false
+	if ai != null and ai.enabled:
+		ai.set_enabled(false)
+	if tutorial != null:
+		tutorial.stop()
 	new_board(rng.randi())
 	state = State.TITLE
 	ui.show_title(best)
@@ -276,7 +310,9 @@ func _update_play(dt: float) -> void:
 	lock_timer = maxf(0.0, lock_timer - dt)
 	_check_hand()
 	if state == State.COUNTDOWN:
-		countdown -= dt
+		if tutorial.active:
+			return  # The pump waits while the walkthrough is on.
+		countdown -= dt * (Tuning.HOLD_SPEED_MULT if speed_held() else 1.0)
 		var n := int(ceil(countdown))
 		if n <= 3 and n >= 1 and n != _beeped:
 			_beeped = n
@@ -328,6 +364,8 @@ func height_speed() -> float:
 
 func effective_speed() -> float:
 	var s := height_speed() * float(Tuning.DIFFICULTY_SPEED.get(difficulty, 1.0))
+	if speed_held():
+		s *= Tuning.HOLD_SPEED_MULT
 	if fast_forward:
 		s *= Tuning.FAST_FORWARD_MULT
 	if surge_timer > 0.0:
@@ -456,7 +494,7 @@ func _game_over(e: Dictionary) -> void:
 	surge_timer = 0.0
 	freeze_timer = 0.0
 	_clear_hand()
-	if score > best:
+	if score > best and not ai_used:
 		best = score
 		new_best = true
 		SaveData.save_best(best, difficulty)
@@ -567,6 +605,7 @@ func _unlock_click(c: int, r: int) -> String:
 			_clear_hand()
 			sfx.play("click")
 		"drop":
+			drops += 1
 			var src: Tile = grid.get_tile(held_from.x, held_from.y) if held_from.x >= 0 else null
 			var old := t.get_item()
 			t.set_item(held_piece)
@@ -622,9 +661,46 @@ func on_pointer_move(pos: Vector2, touch := false) -> void:
 		kb_active = false
 
 
+## Hold to speed up: any press that lasts HOLD_DELAY speeds the water while held.
+func on_hold(pressed: bool) -> void:
+	if pressed and not hold_down:
+		hold_since = time
+	hold_down = pressed
+
+
+func on_hold_key(pressed: bool) -> void:
+	if pressed and not hold_key:
+		hold_since = time
+	hold_key = pressed
+
+
+func speed_held() -> bool:
+	if (state != State.COUNTDOWN and state != State.RUNNING) or paused:
+		return false
+	return ai_hold or ((hold_down or hold_key) and time - hold_since >= Tuning.HOLD_DELAY)
+
+
+## The AI SOLVE button: hand the board to the AI player, or take it back.
+func toggle_ai() -> void:
+	if (state != State.COUNTDOWN and state != State.RUNNING) or mode != "unlock":
+		return
+	ai.set_enabled(not ai.enabled)
+	_clear_hand()
+	if ai.enabled:
+		ai_used = true
+		if tutorial.active:
+			tutorial.finish()
+		ui.show_toast("AI IS PLAYING", Color("9dff8a"))
+	else:
+		ui.show_toast("YOUR TURN", Color.WHITE)
+	sfx.play("click")
+
+
 func on_pointer_press(pos: Vector2, touch := false) -> void:
 	if state != State.COUNTDOWN and state != State.RUNNING or paused:
 		return
+	if ai.enabled:
+		return  # The AI has the board; its button hands it back.
 	if not board_rect.has_point(pos):
 		return
 	var cell := screen_to_tile(pos)
@@ -660,6 +736,8 @@ func on_confirm() -> void:
 		State.COUNTDOWN, State.RUNNING:
 			if paused:
 				toggle_pause()
+			elif ai.enabled:
+				return
 			elif kb_active:
 				try_place(kb_cursor.x, kb_cursor.y)
 			else:
@@ -784,7 +862,9 @@ func _compute_layout() -> void:
 				_slots.append(Rect2(x + (i % 2) * (s1 + 6.0), y + (i / 2) * (s1 + 6.0), s1, s1))
 			x += s0 + 12.0
 		var mid_w := maxf(0.0, freeze_rect.position.x - 10.0 - x)
-		stats_rect = Rect2(x, queue_rect.position.y + 10.0, mid_w, queue_rect.size.y - 20.0)
+		var ai_h := 34.0
+		stats_rect = Rect2(x, queue_rect.position.y + 8.0, mid_w, queue_rect.size.y - 22.0 - ai_h)
+		ai_rect = Rect2(x, stats_rect.end.y + 6.0, mid_w, ai_h)
 	else:
 		# Board on the left, a panel on the right:
 		# HAND (or the queue), height + score, then the power buttons.
@@ -801,7 +881,10 @@ func _compute_layout() -> void:
 		var y := queue_rect.position.y + 40.0
 		# Power buttons: two big full-width buttons at the bottom of the panel.
 		var ph := 112.0 if tall else 60.0
+		var ai_h := 46.0 if tall else 38.0
 		var bottom := queue_rect.end.y - 12.0
+		ai_rect = Rect2(queue_rect.position.x + 12.0, bottom - ai_h, panel_w - 24.0, ai_h)
+		bottom = ai_rect.position.y - 12.0
 		reveal_rect = Rect2(queue_rect.position.x + 12.0, bottom - ph, panel_w - 24.0, ph)
 		freeze_rect = Rect2(reveal_rect.position.x, reveal_rect.position.y - 16.0 - ph, panel_w - 24.0, ph)
 		var stats_h := 136.0 if tall else 100.0

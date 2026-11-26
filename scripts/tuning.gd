@@ -26,7 +26,9 @@ const COUNTDOWN_TIME := 10.0         ## Seconds before the goo starts flowing.
 const BASE_SEGMENT_TIME := 2.6       ## Seconds to fill one tile at speed 1.0x.
 const SPEEDUP_PER_ROW := 0.012       ## Speed gained per row climbed (+1.2% per row).
 const MAX_SPEED := 3.5               ## Cap on the height-based speed factor.
-const FAST_FORWARD_MULT := 5.0       ## Fast-forward flow multiplier.
+const FAST_FORWARD_MULT := 5.0       ## Fast-forward flow multiplier (debug / tests).
+const HOLD_SPEED_MULT := 4.0         ## Water (and countdown) speed while the screen is held.
+const HOLD_DELAY := 0.3              ## Seconds a press must last before it counts as a hold.
 const RESERVOIR_FILL_FACTOR := 4.0   ## Reservoir tiles take this many times longer to fill.
 const NARROW_FILL_FACTOR := 2.5      ## Narrow pipes take this many times longer to fill.
 const NARROW_CHANCE := 0.16          ## Chance a pipe (hidden or in the queue) is narrow.
@@ -53,6 +55,12 @@ const DIFFICULTIES := ["easy", "medium", "hard"]  ## Menu order.
 ## Water speed multiplier per difficulty (on top of the height-based speed).
 const DIFFICULTY_SPEED := {"easy": 0.5, "medium": 1.0, "hard": 1.25}
 const DEFAULT_DIFFICULTY := "medium" ## Used by Enter on the menu until a button is picked.
+
+# --- AI player ------------------------------------------------------------
+const AI_MOVE_SPEED := 900.0         ## Pointer speed in px/s (plus a short settle time per move).
+const AI_THINK_MIN := 0.12           ## Pause between actions, seconds (random in this range).
+const AI_THINK_MAX := 0.32
+const AI_FREEZE_WHEN := 1.6          ## Use Flow-freeze when the water reaches unfinished pipe within this many seconds.
 
 # --- Milestone powers -------------------------------------------------------
 const START_POWERS := 1              ## Flow-freezes and Reveals you start every run with.

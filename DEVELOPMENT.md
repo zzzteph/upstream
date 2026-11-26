@@ -94,11 +94,49 @@ onto the water's path to buy time.
 | Pick up a pipe, then swap it (unlock mode) | Click / tap the pipe, then the spot | Same |
 | Place the next piece (classic mode) | Click / tap an empty tile | Same |
 | Replace a dry pipe (classic, 1 s lock) | Click / tap it | Same |
-| Fast-forward (x5 flow, until game over) | (keyboard only) | F |
+| Speed up (x4 water and countdown, while held) | Hold anywhere on the board or panel (0.3 s) | Hold F |
+| Hand the board to the AI / take it back | AI SOLVE / STOP AI button | |
 | Flow-freeze / Reveal | Snowflake / eye cards in the panel | Q / E |
 | Pause | (pauses by itself when you switch apps) | P / Esc |
 | Mute | In the pause menu | M |
 | Restart | Play again | R |
+
+## First-run walkthrough
+
+The very first game starts with a short walkthrough (`scripts/tutorial.gd`): a
+coach panel at the top of the board and a pulsing frame with a bouncing arrow
+on the thing to tap. It waits for the player to open a hatch, pick a pipe up,
+put it down and hold the screen, then explains the two powers and the AI SOLVE
+button (OK to continue, SKIP to end it). The pump's countdown waits while it
+runs. When it's finished or skipped the flag `tutorial_done` is saved and it
+never shows again.
+
+## AI SOLVE
+
+The button under the power cards hands the board to `scripts/ai_player.gd`, a
+bot that plays like a person: a visible finger moves to every tap at a human
+pace (`AI_MOVE_SPEED`, `AI_THINK_MIN` / `AI_THINK_MAX`, about two taps a
+second) and every tap goes through `try_place()`, exactly like the player's.
+It only uses what is on screen and never reads a closed hatch or the
+generator's guaranteed path. Each time it decides, it:
+
+1. follows the water from where it is through every pipe already connected,
+   to the first cell that isn't (the frontier), and estimates the seconds
+   left before the water gets there;
+2. opens the hatches in the frontier's row, nearest first, and the row above
+   while there's time;
+3. plans the best route through that row and the next (straight up, or along
+   the row and then up), scoring routes by pipes it can't find, swaps needed
+   and length, and steering away from dead ends and rocks;
+4. fetches a matching loose pipe for the first unfinished cell (from rows the
+   water has already passed first) and drops it in: pick, then drop;
+5. uses Flow-freeze when the water is about to reach unfinished pipe
+   (`AI_FREEZE_WHEN`), Reveal when many hatches are still closed and time is
+   short, and holds the screen to speed up when its route is ready.
+
+The player's taps on the board are ignored while it plays; STOP AI gives the
+board back. A run the AI played any part of doesn't set a best score. In
+headless runs it climbs roughly 30-60 rows on Medium.
 
 ## Rules
 
@@ -134,7 +172,7 @@ Every difficulty knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `BASE_SEGMENT_TIME` | 2.6 s | Time to fill one tile at 1.0x |
 | `SPEEDUP_PER_ROW` | 0.012 | Speed gained per row climbed |
 | `MAX_SPEED` | 3.5x | Cap on height-based speed |
-| `FAST_FORWARD_MULT` | 5x | Fast-forward flow speed |
+| `FAST_FORWARD_MULT` | 5x | Debug fast-forward (autoplay and tests) |
 | `RESERVOIR_FILL_FACTOR` | 4 | How much slower reservoirs fill |
 | `REPLACE_LOCK_TIME` | 1 s | Queue lock after replacing a pipe (classic) |
 | `PIECE_WEIGHTS` | 16,16,14,14,14,14,5 | Piece odds (crosses rarest) |
@@ -147,6 +185,9 @@ Every difficulty knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `DIFFICULTY_SPEED` | easy 0.5, medium 1.0, hard 1.25 | Water speed multiplier per menu difficulty |
 | `DEFAULT_DIFFICULTY` | "medium" | Difficulty for Enter on the menu before a button is picked |
 | `START_POWERS` | 1 | Flow-freezes and Reveals at the start of every run |
+| `HOLD_SPEED_MULT` / `HOLD_DELAY` | 4x / 0.3 s | Speed while the screen is held; how long a press must last |
+| `AI_MOVE_SPEED` / `AI_THINK_MIN` / `AI_THINK_MAX` | 900 px/s / 0.12 s / 0.32 s | AI finger speed and pause between taps |
+| `AI_FREEZE_WHEN` | 1.6 s | AI uses Flow-freeze when the water is this close to unfinished pipe |
 | `POWER_AWARD_ROWS` / `FREEZE_TIME` | 100 / 8 s | Rows per extra Flow-freeze + Reveal pair; freeze length |
 | `SCORE_TUBE` / `SCORE_ROW` | 1 / 3 | Points per tube filled / per new row |
 | `SAFE_ROWS` | 5 | Obstacle-free rows at the start |
@@ -173,7 +214,9 @@ Each zone also scales the obstacle mix (`rock_mult`, `oneway_mult`, ...) in
 
 | Script | Role |
 | --- | --- |
-| `main.gd` | Game controller: states, rules, scoring, layout |
+| `main.gd` | Game controller: states, rules, scoring, layout, hold to speed up |
+| `ai_player.gd` | The AI SOLVE bot: reads the visible board, plans, taps with a moving finger |
+| `tutorial.gd` | The first-run walkthrough |
 | `tuning.gd` | Tunable constants |
 | `pieces.gd` | Piece types, openings, water path geometry |
 | `grid.gd`, `tile.gd` | Sparse endless board; rows below the floor are discarded |
@@ -208,7 +251,9 @@ each one solvable. `game_test.gd` drives the real scene with input events:
 the difficulty menu and each difficulty's water speed, the starting powers,
 height and score in the panel, placing, replacing, unlocking and swapping,
 narrow pipes, alarms, pause, the countdown, the +1 / +3 scoring on a cross loop,
-and a 165-row run through four zones.
+hold to speed up (finger and F), every step of the walkthrough and SKIP, the AI
+SOLVE bot climbing 12 rows by itself at under 4 taps a second (and not setting
+a best score), and a 165-row run through four zones.
 
 For testing in a browser, add `?fps` to the URL to log frame rate and draw
 calls to the console, `?autoplay` to let a bot play, and `?powers` to start

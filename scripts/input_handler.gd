@@ -2,11 +2,20 @@
 ##  INPUT - mouse, touch (emulated as mouse) and keyboard.
 ## ============================================================================
 ## UI buttons and overlays eat their own clicks first; whatever reaches
-## _unhandled_input is aimed at the board.
+## _unhandled_input is aimed at the board. A press that reaches the board
+## (or the panel around it) also starts a "hold": keep it down to speed the
+## water up. Releases are watched in _input so a hold always ends.
 class_name InputHandler
 extends Node
 
 var game  ## The Game node (main.gd).
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		game.on_hold(false)
+	elif event is InputEventKey and event.keycode == KEY_F and not event.pressed:
+		game.on_hold_key(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -14,6 +23,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		game.on_pointer_move(event.position, event.device == InputEvent.DEVICE_ID_EMULATION)
 	elif event is InputEventMouseButton:
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			game.on_hold(true)
 			game.on_pointer_press(event.position, event.device == InputEvent.DEVICE_ID_EMULATION)
 			get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed:
@@ -36,11 +46,12 @@ func _on_key(key: int, echo: bool) -> bool:
 		KEY_DOWN, KEY_S:
 			game.move_cursor(0, -1)
 			return true
+	if key == KEY_F:
+		game.on_hold_key(true)  # Hold F to speed up (like holding the screen).
+		return true
 	if echo:
 		return false
 	match key:
-		KEY_F:
-			game.activate_fast_forward()
 		KEY_P, KEY_ESCAPE:
 			game.toggle_pause()
 		KEY_M:

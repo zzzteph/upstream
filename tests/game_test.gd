@@ -43,6 +43,22 @@ func click(pos: Vector2) -> void:
 	root.push_input(up, true)
 
 
+func press_at(pos: Vector2, down := true) -> void:
+	var ev := InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = down
+	ev.position = pos
+	ev.global_position = pos
+	root.push_input(ev, true)
+
+
+func key_state(k: int, down: bool) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = k
+	ev.pressed = down
+	root.push_input(ev, true)
+
+
 func key(k: int) -> void:
 	var ev := InputEventKey.new()
 	ev.keycode = k
@@ -72,6 +88,7 @@ func lay_spine_ahead(rows_ahead := 6) -> void:
 
 func _run() -> void:
 	await frames(3)
+	game.tutorial_pending = false  # The walkthrough has its own test below.
 	var S = game.State
 	# The classic (piece queue) mode is tested first; unlock mode further down.
 	game.mode = "classic"
@@ -174,9 +191,9 @@ func _run() -> void:
 	var above: Tile = game.grid.get_tile(2, 5)  # Make sure the loop ends on an empty tile.
 	above.kind = Tile.EMPTY
 	above.clear_pipe()
-	key(KEY_F)
+	game.activate_fast_forward()
 	await frames(1)
-	check(game.state == S.RUNNING and game.fast_forward, "F during countdown starts the flow in fast-forward")
+	check(game.state == S.RUNNING and game.fast_forward, "fast-forward (debug) during countdown starts the flow")
 	var waited := 0
 	while game.state == S.RUNNING and waited < 2000:
 		await frames(1)
@@ -202,7 +219,7 @@ func _run() -> void:
 	# --- a long perfect run: zones, speed-up, memory ---
 	game.start_run()
 	await frames(1)
-	key(KEY_F)
+	game.activate_fast_forward()
 	var peak_rows := 0
 	var zones_seen := {}
 	var guard := 0
@@ -307,7 +324,7 @@ func _run() -> void:
 	game.start_run()
 	await frames(1)
 	game.grid.get_tile(3, 1).hidden = true
-	key(KEY_F)
+	game.activate_fast_forward()
 	guard = 0
 	while game.state == S.RUNNING and guard < 2000:
 		await frames(1)
@@ -416,6 +433,108 @@ func _run() -> void:
 	key(KEY_Q)
 	await frames(1)
 	check(game.freezes == 0 and game.freeze_timer > 0.0, "Q uses the next freeze charge")
+
+	# --- hold to speed up ---
+	game.mode = "unlock"
+	game.start_run("medium")
+	await frames(1)
+	game._start_flow()
+	var spot := Vector2(game.board_rect.position.x + 10.0, game.board_rect.end.y - 10.0)
+	press_at(spot)
+	await frames(2)
+	check(not game.speed_held(), "a quick press doesn't speed anything up")
+	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
+	check(game.speed_held() and is_equal_approx(game.effective_speed(), game.height_speed() * Tuning.HOLD_SPEED_MULT),
+			"holding the screen speeds the water up x%d" % int(Tuning.HOLD_SPEED_MULT))
+	check(game.ui.speed_badge.visible, "a FAST badge shows while holding")
+	press_at(spot, false)
+	await frames(1)
+	check(not game.speed_held() and is_equal_approx(game.effective_speed(), game.height_speed()), "letting go slows it back down")
+	key_state(KEY_F, true)
+	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
+	check(game.speed_held(), "holding F does the same on a keyboard")
+	key_state(KEY_F, false)
+	await frames(1)
+	check(not game.speed_held(), "releasing F slows it back down")
+	game.start_run("medium")
+	await frames(1)
+	var cd0: float = game.countdown
+	press_at(spot)
+	await frames(60)
+	press_at(spot, false)
+	check(cd0 - game.countdown > 2.0, "holding during the countdown runs it faster (%.1fs in 1s)" % (cd0 - game.countdown))
+
+	# --- first-run walkthrough ---
+	var tut = game.tutorial
+	game.tutorial_pending = true
+	game.start_run("medium")
+	await frames(2)
+	check(tut.active and tut.visible, "the walkthrough starts on the first game")
+	var cd1: float = game.countdown
+	await frames(60)
+	check(game.countdown == cd1, "the pump waits while the walkthrough is on")
+	click(tut.target_rect().get_center())
+	await frames(1)
+	check(tut.step == tut.Step.PICK, "walkthrough 1: tapping the highlighted hatch opens it")
+	guard = 0
+	while tut.step == tut.Step.PICK and guard < 14:
+		click(tut.target_rect().get_center())  # Opens more hatches until a pipe shows up, then picks it.
+		await frames(1)
+		guard += 1
+	check(tut.step == tut.Step.DROP and game.held_piece >= 0, "walkthrough 2: tapping a pipe picks it up")
+	click(tut.target_rect().get_center())
+	await frames(1)
+	check(tut.step == tut.Step.SPEED and game.drops >= 1, "walkthrough 3: tapping the highlighted slot puts it down")
+	press_at(spot)
+	await frames(60)
+	press_at(spot, false)
+	await frames(1)
+	check(tut.step == tut.Step.POWERS, "walkthrough 4: holding the screen")
+	click(tut._ok.get_global_rect().get_center())
+	await frames(1)
+	check(tut.step == tut.Step.AI, "walkthrough 5: the powers")
+	click(tut._ok.get_global_rect().get_center())
+	await frames(1)
+	check(not tut.active and not game.tutorial_pending and SaveData.load_flag("tutorial_done"), "walkthrough 6: done, and saved so it won't show again")
+	var cd2: float = game.countdown
+	await frames(30)
+	check(game.countdown < cd2, "the countdown runs again after the walkthrough")
+	game.tutorial_pending = true
+	game.start_run("medium")
+	await frames(2)
+	click(tut._skip.get_global_rect().get_center())
+	await frames(1)
+	check(not tut.active and not game.tutorial_pending, "SKIP ends the walkthrough")
+
+	# --- AI SOLVE: a bot that plays through taps, at a human pace ---
+	seed(4242)
+	game.rng.seed = 4242
+	game.start_run("medium")
+	await frames(2)
+	check(game.ui.btn_ai.visible and Rect2(Vector2.ZERO, game.view_size).encloses(game.ui.btn_ai.get_global_rect()), "the AI SOLVE button is on screen")
+	var best_before := SaveData.load_best("medium")
+	click(game.ui.btn_ai.get_global_rect().get_center())
+	await frames(1)
+	check(game.ai.enabled and game.ui.btn_ai.text == "STOP AI", "AI SOLVE hands the board to the AI")
+	click(tile_center(0, 2))
+	await frames(1)
+	check(game.grid.get_tile(0, 2).hidden, "your taps on the board are ignored while the AI plays")
+	guard = 0
+	while game.state != S.GAMEOVER and game.height < 12 and guard < 60 * 150:
+		await frames(1)
+		guard += 1
+	var secs := guard / 60.0
+	check(game.height >= 12, "the AI climbs on its own (row %d after %.0fs, %s)" % [game.height, secs, game.last_reason])
+	check(game.ai.actions >= 10 and game.flips > 0 and game.drops > 0, "it plays by tapping: %d taps, %d hatches opened, %d pipes moved" % [game.ai.actions, game.flips, game.drops])
+	check(game.ai.actions / maxf(1.0, secs) < 4.0, "at a human pace (%.1f taps a second)" % (game.ai.actions / maxf(1.0, secs)))
+	if game.state != S.GAMEOVER:
+		click(game.ui.btn_ai.get_global_rect().get_center())
+		await frames(1)
+		check(not game.ai.enabled and game.ui.btn_ai.text == "AI SOLVE", "STOP AI hands the board back")
+		game.score = best_before + 1000
+		game._game_over({"reason": "rock", "col": 3, "row": game.flow.row, "exit": Pieces.N})
+		await frames(120)
+	check(SaveData.load_best("medium") == best_before, "a run the AI played doesn't set a best score")
 
 	# --- frame cost ---
 	var total := 0.0

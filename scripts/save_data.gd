@@ -43,3 +43,26 @@ static func save_best(score: int, difficulty := "medium") -> void:
 	var err := cfg.save(PATH)
 	if err != OK and not OS.has_feature("web"):
 		push_warning("Could not save high score (error %d)" % err)
+
+
+## One-time flags, such as "tutorial_done".
+static func load_flag(name: String) -> bool:
+	if OS.has_feature("web"):
+		var v = JavaScriptBridge.eval(
+				"(function(){try{return String(window.localStorage.getItem('upstream_%s')||'');}catch(e){return '';}})()" % name, true)
+		if v != null and str(v) == "1":
+			return true
+	var cfg := ConfigFile.new()
+	if cfg.load(PATH) == OK:
+		return bool(cfg.get_value("flags", name, false))
+	return false
+
+
+static func save_flag(name: String, on := true) -> void:
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval(
+				"(function(){try{window.localStorage.setItem('upstream_%s','%s');}catch(e){}})()" % [name, "1" if on else ""], true)
+	var cfg := ConfigFile.new()
+	cfg.load(PATH)  # Missing file is fine.
+	cfg.set_value("flags", name, on)
+	cfg.save(PATH)
