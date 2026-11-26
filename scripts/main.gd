@@ -62,17 +62,21 @@ var freeze_started := -100.0       ## Game time the current freeze began.
 var _next_award_row := Tuning.POWER_AWARD_ROWS
 var flips := 0
 var drops := 0                     ## Pipes put down this run (unlock mode).
+var actions := 0                   ## Taps that did something this run (board taps, Freeze, Reveal).
+var play_time := 0.0               ## Seconds played this run (countdown and flow, not paused).
 # Hold to speed up: a press that lasts HOLD_DELAY (finger, mouse button or F).
 var hold_down := false
 var hold_since := 0.0
 var hold_key := false
 var ai_hold := false               ## The AI player is "holding" the screen.
+var hold_tubes := 0                ## Tubes filled during the current hold: it speeds up (and pays more) with each.
+var _score_frac := 0.0             ## Fractions of a point (from the hold multiplier) not yet added to the score.
 # AI player and first-run walkthrough
 var ai: AIPlayer
 var tutorial: Tutorial
 var tutorial_pending := false      ## Show the walkthrough at the next run (first game ever).
 var ai_used := false               ## The AI played this run: no best score.
-var ai_game := false               ## The last run was started with WATCH AI (PLAY AGAIN repeats it).
+var ai_game := false               ## The last run was started with SOLVER (PLAY AGAIN repeats it).
 
 # Layout, in virtual pixels (720 on the short side).
 var view_size := Vector2(720, 720)
@@ -85,6 +89,7 @@ var queue_rect := Rect2()
 var stats_rect := Rect2()    ## Height and score, inside the panel.
 var freeze_rect := Rect2()   ## Milestone power buttons (shown while playing).
 var reveal_rect := Rect2()
+var pause_rect := Rect2()    ## The pause button (top of the panel, above the hand).
 var _slots: Array = []
 
 # Pointer / keyboard cursor
@@ -182,9 +187,13 @@ func new_board(seed_value: int) -> void:
 	_next_award_row = Tuning.POWER_AWARD_ROWS
 	flips = 0
 	drops = 0
+	actions = 0
+	play_time = 0.0
 	hold_down = false
 	hold_key = false
 	ai_hold = false
+	hold_tubes = 0
+	_score_frac = 0.0
 	flow.reset()
 	if renderer:
 		renderer.clear_fx()
@@ -211,7 +220,7 @@ func new_board(seed_value: int) -> void:
 	kb_active = false
 
 
-## Start a run. `with_ai`: WATCH AI - the AI player plays the whole run (your
+## Start a run. `with_ai`: SOLVER - the AI player plays the whole run (your
 ## taps on the board are ignored, and it doesn't set a best score).
 func start_run(with_ai := false) -> void:
 	ai_game = with_ai and mode == "unlock"
@@ -228,7 +237,7 @@ func start_run(with_ai := false) -> void:
 	ui.show_play()
 	sfx.play("click")
 	if ai_game:
-		ui.show_toast("AI IS PLAYING", Color("9dff8a"))
+		ui.show_toast("SOLVER IS PLAYING", Color("9dff8a"))
 	elif tutorial_pending and mode == "unlock":
 		tutorial.start()
 
@@ -310,7 +319,10 @@ func _process(dt: float) -> void:
 
 
 func _update_play(dt: float) -> void:
+	play_time += dt
 	lock_timer = maxf(0.0, lock_timer - dt)
+	if not speed_held():
+		hold_tubes = 0  # Let go: the next hold starts from x4 again.
 	_check_hand()
 	if state == State.COUNTDOWN:
 		if tutorial.active:
@@ -345,7 +357,7 @@ func _update_spill(dt: float) -> void:
 		renderer.burst(spill["p"], spill["col"], 2, 2.2, 0.06, 0.8, 9.0)
 	if spill_timer <= 0.0:
 		state = State.GAMEOVER
-		ui.show_game_over(REASONS.get(last_reason, "The water spilled."), score, height, best, new_best)
+		ui.show_game_over(REASONS.get(last_reason, "The water spilled."), score, height, best, new_best, actions_per_second())
 
 
 func _ensure_rows() -> void:
@@ -360,14 +372,33 @@ func _ensure_rows() -> void:
 
 # --- rules & scoring ---------------------------------------------------------------------
 
+## The water's speed from the height alone: 1x at the start, rising evenly to
+## SPEED_MAX at SPEED_MAX_ROW.
 func height_speed() -> float:
-	return 1.0 + mini(height, Tuning.SPEEDUP_MAX_ROW) * Tuning.SPEEDUP_PER_ROW
+	return 1.0 + (Tuning.SPEED_MAX - 1.0) * minf(height, Tuning.SPEED_MAX_ROW) / float(Tuning.SPEED_MAX_ROW)
+
+
+## Holding to speed up: x4 at first, +10% of that for every tube filled while
+## you keep holding, up to x8 (after 10 tubes).
+func hold_speed_mult() -> float:
+	return minf(Tuning.HOLD_SPEED_MAX, Tuning.HOLD_SPEED_MULT * (1.0 + Tuning.HOLD_RAMP * hold_tubes))
+
+
+## Points per tube while holding: 2x at first, rising the same way up to 4x.
+func hold_score_mult() -> float:
+	return minf(Tuning.HOLD_SCORE_MAX, Tuning.HOLD_SCORE_MULT * (1.0 + Tuning.HOLD_RAMP * hold_tubes))
+
+
+## 0..1: how far the current hold has ramped up towards its maximum.
+func hold_ramp() -> float:
+	var full := (Tuning.HOLD_SPEED_MAX / Tuning.HOLD_SPEED_MULT - 1.0) / Tuning.HOLD_RAMP
+	return clampf(hold_tubes / full, 0.0, 1.0)
 
 
 func effective_speed() -> float:
 	var s := height_speed()
 	if speed_held():
-		s *= Tuning.HOLD_SPEED_MULT
+		s *= hold_speed_mult()
 	if fast_forward:
 		s *= Tuning.FAST_FORWARD_MULT
 	if freeze_timer > 0.0:
@@ -376,10 +407,14 @@ func effective_speed() -> float:
 
 
 ## The score is simple: +SCORE_TUBE for every tube the water fills (a cross
-## filled both ways is two tubes), x HOLD_SCORE_MULT while the player holds to
-## speed up. Climbing rows gives no points of its own.
-func add_points(n: int) -> void:
-	score += n
+## filled both ways is two tubes), times the hold multiplier (2x rising to 4x)
+## while the player holds to speed up. Climbing rows gives no points of its own.
+## Fractions of a point carry over to the next tube.
+func add_points(n: float) -> void:
+	_score_frac += n
+	var whole := int(floor(_score_frac + 0.0001))
+	_score_frac -= whole
+	score += whole
 
 
 func _goo_color() -> Color:
@@ -405,8 +440,13 @@ func _handle_event(e: Dictionary) -> void:
 			var t: Tile = e["tile"]
 			if t.kind == Tile.SOURCE:
 				return
-			# Holding to speed up doubles the points for every tube.
-			add_points(Tuning.SCORE_TUBE * (Tuning.HOLD_SCORE_MULT if speed_held() else 1))
+			# Holding to speed up pays more for every tube - and more again for
+			# each tube you keep holding through.
+			if speed_held():
+				add_points(Tuning.SCORE_TUBE * hold_score_mult())
+				hold_tubes += 1
+			else:
+				add_points(Tuning.SCORE_TUBE)
 			sfx.play("tick", 0.92 + randf() * 0.16 + minf(0.5, height * 0.004), -5.0)
 		"blocked":
 			_game_over(e)
@@ -430,6 +470,7 @@ func use_freeze() -> bool:
 		sfx.play("deny")
 		return false
 	freezes -= 1
+	actions += 1
 	freeze_timer = Tuning.FREEZE_TIME
 	freeze_started = time
 	sfx.play("freeze")
@@ -470,6 +511,7 @@ func use_reveal() -> bool:
 		sfx.play("deny")
 		return false
 	reveals -= 1
+	actions += 1
 	sfx.play("reveal")
 	ui.show_toast("REVEALED", Color("ffd86a"))
 	return true
@@ -524,17 +566,27 @@ func placement_mode(c: int, r: int) -> String:
 	return "replace" if t.piece >= 0 else "place"
 
 
+## Average taps that did something, per second played this run.
+func actions_per_second() -> float:
+	return actions / maxf(1.0, play_time)
+
+
 func try_place(c: int, r: int) -> String:
 	if (state != State.COUNTDOWN and state != State.RUNNING) or paused:
 		return "inactive"
 	if mode == "unlock":
-		return _unlock_click(c, r)
+		var done := _unlock_click(c, r)
+		if done != "no":
+			actions += 1
+		return done
 	var action := placement_mode(c, r)
 	var t := grid.get_tile(c, r)
 	var wp := Vector2(c + 0.5, r + 0.5)
 	if action == "place" or action == "replace":
 		grid.touch(r)
 		renderer.animate_row(r, time + 0.45)
+	if action == "place" or action == "replace":
+		actions += 1
 	match action:
 		"place", "replace":
 			t.set_item(queue.pop_front())
@@ -806,7 +858,7 @@ func _compute_layout() -> void:
 	var unlock := mode == "unlock"
 	if portrait:
 		# Board on top, a control bar along the bottom:
-		# [hand / queue] [height + score] [freeze] [reveal]
+		# [pause over the hand / queue] [height + score] [freeze] [reveal]
 		var bottom_h := clampf(view_size.y * 0.2, 164.0, 214.0)
 		var avail_w := view_size.x - 40.0
 		var avail_h := view_size.y - bottom_h
@@ -814,14 +866,17 @@ func _compute_layout() -> void:
 		var bw := T * Tuning.COLS
 		board_rect = Rect2(_px((view_size.x - bw) * 0.5), 0.0, bw, _px(view_size.y - bottom_h))
 		queue_rect = Rect2(8.0, board_rect.end.y + 6.0, view_size.x - 16.0, bottom_h - 14.0)
-		var s0 := minf(queue_rect.size.y - 34.0, 88.0)
+		var pause_h := 38.0
+		var s0 := minf(queue_rect.size.y - 32.0 - pause_h, 88.0)
 		# Power buttons: big thumb targets at the right end of the bar.
 		var bar_h := queue_rect.size.y - 24.0
 		var pw := minf(bar_h * 0.78, 120.0)
 		reveal_rect = Rect2(queue_rect.end.x - 12.0 - pw, queue_rect.position.y + 12.0, pw, bar_h)
 		freeze_rect = Rect2(reveal_rect.position.x - 14.0 - pw, reveal_rect.position.y, pw, bar_h)
 		var x := queue_rect.position.x + 14.0
-		var y := queue_rect.position.y + 24.0 + maxf(0.0, (queue_rect.size.y - 34.0 - s0) * 0.5)
+		var y := queue_rect.position.y + maxf(10.0, (queue_rect.size.y - pause_h - 10.0 - s0) * 0.5)
+		pause_rect = Rect2(x, y, s0, pause_h)
+		y += pause_h + 10.0
 		_slots.append(Rect2(x, y, s0, s0))
 		x += s0 + 12.0
 		if not unlock:
@@ -834,7 +889,7 @@ func _compute_layout() -> void:
 		stats_rect = Rect2(x, queue_rect.position.y + 10.0, mid_w, queue_rect.size.y - 20.0)
 	else:
 		# Board on the left, a panel on the right:
-		# HAND (or the queue), height + score, then the power buttons.
+		# pause, the hand (or the queue), height + score, then the power buttons.
 		var panel_w := clampf(view_size.x * 0.2, 150.0, 260.0)
 		var avail_w := view_size.x - panel_w - 80.0
 		T = _tile_size(minf(avail_w / Tuning.COLS, view_size.y / min_rows))
@@ -845,7 +900,8 @@ func _compute_layout() -> void:
 		queue_rect = Rect2(board_rect.end.x + 30.0, 12.0, panel_w, view_size.y - 24.0)
 		var tall := view_size.y >= 600.0
 		var cx := queue_rect.get_center().x
-		var y := queue_rect.position.y + 40.0
+		pause_rect = Rect2(queue_rect.position.x + 12.0, queue_rect.position.y + 12.0, panel_w - 24.0, 44.0 if view_size.y >= 600.0 else 36.0)
+		var y := pause_rect.end.y + 14.0
 		# Power buttons: two big full-width buttons at the bottom of the panel.
 		var ph := 112.0 if tall else 60.0
 		var bottom := queue_rect.end.y - 12.0

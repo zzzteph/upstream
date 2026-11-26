@@ -114,7 +114,7 @@ class PointerView:
 		draw_circle(p + Vector2(3, 5), r + 1.0, Color(0, 0, 0, 0.35))
 		draw_circle(p, r, Color(1, 1, 1, 0.82))
 		draw_arc(p, r, 0.0, TAU, 40, Color("7dff6a"), 3.0, true)
-		draw_string(PipeArt.font(), p + Vector2(-r, 5), "AI", HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, 13, Color("0b2a12"))
+		draw_circle(p, r * 0.28, Color("2e9b3a"))
 
 
 func _ready() -> void:
@@ -157,7 +157,7 @@ func _process(dt: float) -> void:
 		_hold_check -= dt
 		if _hold_check > 0.0:
 			return
-		_hold_check = 0.2
+		_hold_check = 0.1
 		var w := _water()
 		var plan := _plan(w)
 		var ae: float = float(plan.get("arrive_end", 0.0))

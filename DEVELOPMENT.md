@@ -58,9 +58,10 @@ resolution. The board takes about 130 draw calls, and game scripts take about
 ## Menu and modes
 
 The main menu shows the best score above the nameplate, a big NEW GAME button
-and a small WATCH AI button (an AI game, see below). There are no difficulty
-levels: the water starts at one speed and gains 1% of it for every row climbed,
-up to row 300 (4x), flat after that. The best score is stored under
+and a small SOLVER button (a game the AI plays, see below). There are no
+difficulty levels: the water starts at one speed and rises evenly to 8x by row
+800 (`SPEED_MAX`, `SPEED_MAX_ROW`: about +0.9% of the starting speed per row),
+flat after that. The best score is stored under
 `upstream_score_medium` (the key the old Medium level used, so that record
 carries over). PLAY AGAIN, RESTART, R and Enter on the game-over screen repeat
 the same kind of game.
@@ -96,10 +97,10 @@ onto the water's path to buy time.
 | Pick up a pipe, then swap it (unlock mode) | Click / tap the pipe, then the spot | Same |
 | Place the next piece (classic mode) | Click / tap an empty tile | Same |
 | Replace a dry pipe (classic, 1 s lock) | Click / tap it | Same |
-| Speed up (x4 water and countdown, 2x points per tube, while held) | Hold anywhere on the board or panel (0.3 s) | Hold F |
-| Watch the AI play a game | WATCH AI on the menu | |
-| Flow-freeze / Reveal | Snowflake / eye cards in the panel | Q / E |
-| Pause | (pauses by itself when you switch apps) | P / Esc |
+| Speed up (x4 water and countdown, 2x points per tube, both +10% per tube held through, up to x8 / 4x) | Hold anywhere on the board or panel (0.3 s) | Hold F |
+| Watch the solver play a game | SOLVER on the menu | |
+| Flow-freeze / Reveal | FREEZE / REVEAL buttons in the panel | Q / E |
+| Pause | The pause button at the top of the panel (also pauses by itself when you switch apps) | P / Esc |
 | Mute | In the pause menu | M |
 | Restart | Play again | R |
 
@@ -120,9 +121,50 @@ coach panel sits at the top of the board, everything but the target is dimmed
 pump's countdown waits while it runs. When it's finished the flag
 `tutorial_done` is saved and it never shows again.
 
-## WATCH AI
+## Feedback
 
-The small WATCH AI button on the menu starts a game played by
+- **Speed in the background.** Bubbles and current streaks rise through the
+  backdrop at the water's pace (`BoardRenderer.flow_motion`, eased, a softened
+  power of the real speed): faster as it climbs, rushing and stretching into
+  streaks while you hold, still during a freeze. The zones' own decorations
+  (bubbles, embers, gears, grid streaks) move at the same pace, and a glass
+  channel in each side wall of the board shows it too (on a phone the board
+  covers most of the backdrop).
+- **Freeze countdown.** While a freeze runs, the FREEZE button reads FROZEN
+  with the seconds left, and ice fills it and drains away as time runs out.
+- **FAST badge.** While you hold, a badge at the top of the board shows the
+  current speed and points multipliers, with a bar that fills as the hold
+  ramps up to its maximum.
+- Freeze, Reveal and Pause are plain text buttons in the same rounded style as
+  the menu buttons; the HEIGHT arrow and SCORE star are drawn with smoothed
+  edges.
+- **Actions per second.** The game-over screen shows the run's average: taps
+  that did something (open a hatch, pick up or put down a pipe, Freeze,
+  Reveal) per second played, pauses not counted (`actions`, `play_time` in
+  `main.gd`). Solver games count the solver's taps.
+
+## Assets and licences
+
+Everything the game shows or plays is made by its own code, so there are no
+third-party images, sounds or fonts to license:
+
+- Pipes, tiles, rocks, buttons, icons, backgrounds and the logo are drawn with
+  Godot's drawing calls (`pipe_art.gd`, `sprite_atlas.gd`,
+  `board_renderer.gd`, `ui.gd`, `title_backdrop.gd`, `station_logo.gd`).
+  `icon.svg` was written by hand for this project. The screenshots in `media/`
+  are of this game.
+- Sounds are synthesised when the game starts (`sfx.gd`).
+- Text uses Godot's built-in default font, Open Sans SemiBold, under the SIL
+  Open Font License 1.1, which allows commercial use and embedding.
+- The engine is Godot, under the MIT licence. A commercial release (Google
+  Play, Steam) must show Godot's licence text, and the notices of the
+  third-party libraries built into the engine, somewhere the player can find
+  them, such as a credits screen. See "Complying with licenses" in the Godot
+  docs.
+
+## SOLVER
+
+The small SOLVER button on the menu starts a game played by
 `scripts/ai_player.gd`, a bot that solves the puzzle the way a person would. A visible finger moves to
 every tap at a human pace (`AI_MOVE_SPEED`, `AI_THINK_MIN` / `AI_THINK_MAX`:
 about three taps a second, like a quick player, a little faster when it's in
@@ -178,7 +220,7 @@ rebuilds that spot afterwards.
     (more at high speed).
 
 The player's taps on the board are ignored while it plays; MAIN MENU (pause or
-game over) ends it. An AI game doesn't set a best score.
+game over) ends it. A solver game doesn't set a best score.
 
 **Style.** It snakes the pipe wall to wall instead of rushing straight up: the
 search also tracks the column where the route entered each row, and turning up
@@ -205,27 +247,29 @@ end of the route is opened by its deadline (see 4), early enough to re-route
 if it hides a rock.
 
 `tests/ai_bench.gd` plays seeded games and reports how far it gets (up to row
-400), with tubes per row; `-- 1 400 <n>` replays game n and prints the AI's
-last decisions and the board when it loses. Latest results (8 games): rows
-193-400+ (median about 300; one still going at row 400), about 2 tubes per
-row overall (2.5 while snaking early on). One loss in eight was to a rock, at
-top speed with no pipe on screen for the only way up; the rest are the water
-at 3.7-4x outpacing what human-speed tapping can build or find.
+400), with tubes per row; `-- 1 400 <n>` replays game n and prints the
+solver's last decisions and the board when it loses. Latest results (8 games):
+rows 251-400+ (median about 360; two still going at row 400), about 2 tubes
+per row overall (2.5 while snaking early on). It loses when the water at
+3.2-4.5x outpaces what human-speed tapping can build or find: stuck for want
+of the one pipe the only way up needs, with no Freeze or Reveal left.
 
 ## Rules
 
 - Water starts after a 10-second countdown, shown on the pump's pressure gauge,
-  and speeds up 1% of its starting speed per row, up to row 300 (4x). The
-  panel shows just your height and score.
+  and speeds up evenly with height, to 8x its starting speed at row 800. The
+  panel shows your height and score, the pause button and the two powers.
 - In unlock mode every row hides at least the pipes its guaranteed path needs,
   so unlocking a row and swapping pipes within it is always enough.
 - The run ends when water reaches an open pipe end, a wall, a rock, an empty tile,
   a pipe that is already full, or a one-way pipe from the wrong side.
 - Pieces: straight horizontal and vertical, four corners and a cross. A cross can
   be filled twice, once each way.
-- Scoring: +1 per tube the water fills (a cross filled both ways is two tubes),
-  x2 (`HOLD_SCORE_MULT`) while the player holds to speed up. Rows give no
-  points of their own. Nothing else: no bonuses, no penalties, and the debug
+- Scoring: +1 per tube the water fills (a cross filled both ways is two tubes).
+  Holding to speed up makes the water x4 as fast and every tube worth 2x; each
+  tube filled while you keep holding adds 10% of that to both, up to x8 speed
+  and 4x points (after 10 tubes). Letting go resets it. Fractions of a point
+  carry over. Rows give no points of their own. Nothing else: no bonuses, no penalties, and the debug
   fast-forward doesn't change the points.
 - Obstacles grow with height: rocks, one-way pipes (brass, with arrows) and
   reservoirs (fixed pipes that swell into a wide chamber and take 4x as long to
@@ -246,7 +290,7 @@ Every knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | --- | --- | --- |
 | `COUNTDOWN_TIME` | 10 s | Delay before the water starts |
 | `BASE_SEGMENT_TIME` | 2.6 s | Time to fill one tile at 1.0x |
-| `SPEEDUP_PER_ROW` / `SPEEDUP_MAX_ROW` | 0.01 / 300 | +1% speed per row climbed, up to row 300 (4x) |
+| `SPEED_MAX` / `SPEED_MAX_ROW` | 8x / 800 | Top speed of the water, reached evenly by this row |
 | `FAST_FORWARD_MULT` | 5x | Debug fast-forward (autoplay and tests) |
 | `RESERVOIR_FILL_FACTOR` | 4 | How much slower reservoirs fill |
 | `REPLACE_LOCK_TIME` | 1 s | Queue lock after replacing a pipe (classic) |
@@ -256,12 +300,13 @@ Every knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `UNLOCK_SPINE_PIECE_CHANCE` | 0.5 | Chance a path tile already hides the pipe it needs |
 | `FLIP_TIME` | 0.3 s | Unlock flip animation |
 | `START_POWERS` | 1 | Flow-freezes and Reveals at the start of every run |
-| `HOLD_SPEED_MULT` / `HOLD_DELAY` | 4x / 0.3 s | Speed while the screen is held; how long a press must last |
-| `HOLD_SCORE_MULT` | 2 | Points per tube while holding |
-| `AI_CURVY` / `AI_CURVY_UNTIL_SPEED` | 14 / 3.0x | How hard the AI snakes wall to wall, and the speed where it stops |
-| `AI_MOVE_SPEED` / `AI_THINK_MIN` / `AI_THINK_MAX` | 900 px/s / 0.12 s / 0.32 s | AI finger speed and pause between taps |
+| `HOLD_SPEED_MULT` / `HOLD_SPEED_MAX` | 4x / 8x | Speed when you start holding the screen, and its ceiling |
+| `HOLD_SCORE_MULT` / `HOLD_SCORE_MAX` | 2x / 4x | Points per tube when you start holding, and their ceiling |
+| `HOLD_RAMP` / `HOLD_DELAY` | 0.1 / 0.3 s | What each tube held through adds (10% of the starting x); how long a press must last |
+| `AI_CURVY` / `AI_CURVY_UNTIL_SPEED` | 25 / 3.0x | How hard the solver snakes wall to wall, and the speed where it stops |
+| `AI_MOVE_SPEED` / `AI_THINK_MIN` / `AI_THINK_MAX` | 1400 px/s / 0.06 s / 0.18 s | Solver finger speed and pause between taps |
 | `POWER_AWARD_ROWS` / `FREEZE_TIME` | 100 / 8 s | Rows per extra Flow-freeze + Reveal pair; freeze length |
-| `SCORE_TUBE` | 1 | Points per tube filled (x `HOLD_SCORE_MULT` while holding) |
+| `SCORE_TUBE` | 1 | Points per tube filled (times the hold multiplier while holding) |
 | `SAFE_ROWS` | 5 | Obstacle-free rows at the start |
 | `ROCK_BASE` / `ROCK_PER_ROW` / `ROCK_MAX` | 0.10 / 0.0025 / 0.40 | Rock density and growth |
 | `MAX_ROCKS_PER_ROW` | 4 | Hard cap per row |
@@ -287,7 +332,7 @@ Each zone also scales the obstacle mix (`rock_mult`, `oneway_mult`, ...) in
 | Script | Role |
 | --- | --- |
 | `main.gd` | Game controller: states, rules, scoring, layout, hold to speed up |
-| `ai_player.gd` | The WATCH AI bot: reads the visible board, plans, taps with a moving finger |
+| `ai_player.gd` | The SOLVER bot: reads the visible board, plans, taps with a moving finger |
 | `tutorial.gd` | The first-run walkthrough |
 | `tuning.gd` | Tunable constants |
 | `pieces.gd` | Piece types, openings, water path geometry |
@@ -298,10 +343,10 @@ Each zone also scales the obstacle mix (`rock_mult`, `oneway_mult`, ...) in
 | `zones.gd` | Zone palettes and obstacle mixes |
 | `pipe_art.gd` | Vector drawing of pipes, water, rocks and icons |
 | `sprite_atlas.gd` | Rasterises the vector art once per zone into textures |
-| `board_renderer.gd` | Backdrop, cached board rows, live water tile, particles, queue |
+| `board_renderer.gd` | Backdrop (with the speed-paced current), cached board rows, live water tile, particles, queue |
 | `ps1_screen.gdshader` | 15-bit colour and ordered dither for the low-res board |
 | `input_handler.gd` | Mouse, touch and keyboard |
-| `ui.gd` | Height and score in the panel, power buttons, banners, title / pause / game-over screens |
+| `ui.gd` | Height and score in the panel, pause / power buttons, FAST badge, banners, title / pause / game-over screens |
 | `title_backdrop.gd` | The menu's background: pump-station wall and flowing pipes |
 | `station_logo.gd` | The UPSTREAM nameplate: steel plate, gauge, stencil letters |
 | `sfx.gd` | Synthesised sound effects |
@@ -320,12 +365,14 @@ godot --headless --fixed-fps 60 --script res://tests/game_test.gd
 `run_tests.gd` checks every piece from every entry side, the cross both ways,
 every way the water can be stopped, and generates 250 seeds x 420 rows to prove
 each one solvable. `game_test.gd` drives the real scene with input events:
-the menu (best score, NEW GAME, WATCH AI), the speed curve, the starting powers,
+the menu (best score, NEW GAME, SOLVER), the speed curve, the starting powers,
 height and score in the panel, placing, replacing, unlocking and swapping,
-narrow pipes, pause, the countdown, the +1-per-tube scoring on a cross loop,
-hold to speed up (finger and F, 2x points), the prepared walkthrough board and every
+narrow pipes, pause (P, Esc and the pause button), the countdown, the
++1-per-tube scoring on a cross loop, hold to speed up (finger and F, the ramp
+to x8 speed and 4x points, reset on letting go), the freeze button's
+countdown fill, the prepared walkthrough board and every
 step of the walkthrough (including putting back a wrong pipe; no SKIP), the
-WATCH AI bot climbing 25 rows by itself at under 4 taps a second without stalling,
+solver climbing 25 rows by itself at under 4 taps a second without stalling,
 rebuilding its route after a pipe on it is broken, holding to speed up, and
 not setting a best score, and a 165-row run through four zones.
 

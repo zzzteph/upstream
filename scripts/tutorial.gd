@@ -10,7 +10,7 @@
 ##   3. pick the pipe up
 ##   4. put it in the slot above the pump (now the water has a way up)
 ##   5. how the water flows               (OK)
-##   6. hold to speed up (2x points)      (hold, or OK)
+##   6. hold to speed up (more points)    (hold, or OK)
 ##   7. Freeze and Reveal                 (LET'S GO)
 ##
 ## Steps 1-4 follow the board itself, so they stay right whatever the player
@@ -181,7 +181,8 @@ func _process(dt: float) -> void:
 			_target = game.renderer.tile_rect(SLOT.x, SLOT.y).merge(game.renderer.tile_rect(SLOT.x, 0))
 		Step.SPEED:
 			var hold := "Hold your finger on the screen" if game.is_touch else "Hold the mouse button down (or the F key)"
-			_set_text("%s to speed the water up x%d. Every tube scores %dx while you hold. Let go to slow it down again." % [hold, int(Tuning.HOLD_SPEED_MULT), Tuning.HOLD_SCORE_MULT])
+			_set_text("%s to speed the water up x%d and score %dx per tube. Keep holding: every tube adds 10%% more, up to x%d speed and %dx points. Let go to slow it down again." % [
+					hold, int(Tuning.HOLD_SPEED_MULT), int(Tuning.HOLD_SCORE_MULT), int(Tuning.HOLD_SPEED_MAX), int(Tuning.HOLD_SCORE_MAX)])
 			_target = b  # Hold anywhere on the board.
 			if game.speed_held():
 				_held_for += dt

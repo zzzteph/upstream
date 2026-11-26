@@ -5,179 +5,115 @@ class_name GameUI
 extends CanvasLayer
 
 
-## A power card (Flow-freeze or Reveal), drawn as a piece of the pump
-## station: a loop of pipe (steel for Freeze, brass for Reveal) with bolted
-## flange collars and a coloured channel, around a dark plate. The icon sits
-## behind a bolted porthole. Wide cards put the name and charges beside the
-## porthole; tall ones put the charges under it.
-class IconButton:
+## Fill a polygon with smooth edges (a plain polygon has hard, stair-step
+## edges; a thin anti-aliased outline in the same colour softens them).
+static func smooth_poly(ci: CanvasItem, pts: PackedVector2Array, col: Color) -> void:
+	ci.draw_colored_polygon(pts, col)
+	var closed := pts.duplicate()
+	closed.append(pts[0])
+	ci.draw_polyline(closed, col, 1.2, true)
+
+
+## A HUD button in the same chunky style as the menu buttons: a rounded face
+## on a darker base that it sinks onto when pressed. Freeze and Reveal are
+## just text - the name and the charges left. While a freeze runs, ice fills
+## the Freeze button and drains away as the seconds run out (with the seconds
+## left on it), so you can see when the water starts again. Pause shows two
+## bars (and PAUSE when there's room).
+class HudButton:
 	extends Button
-	const FREEZE_COL := Color("8fe8ff")
-	const REVEAL_COL := Color("ffc928")
-	const STEEL_PIPE := Color("8fa3ab")
-	const BRASS_PIPE := Color("c9973a")
+	const COLORS := {
+		"freeze": [Color("123247"), Color("8fe8ff")],
+		"reveal": [Color("3a2b0b"), Color("ffc928")],
+		"pause": [Color("2a3640"), Color("3ab4ff")],
+	}
+	const ICE := Color(0.56, 0.91, 1.0)
 	var kind := ""
-	var lit := false
 	var count := 0
 	var label := ""
+	var progress := 0.0     ## Freeze: share of the freeze still to run (0 = not frozen).
+	var seconds := 0.0      ## Freeze: seconds left.
 	var _sb := StyleBoxFlat.new()
 
 	func _draw() -> void:
-		var accent := FREEZE_COL if kind == "freeze" else REVEAL_COL
-		var metal := STEEL_PIPE if kind == "freeze" else BRASS_PIPE
-		match get_draw_mode():
-			DRAW_HOVER:
-				metal = metal.lightened(0.15)
-			DRAW_PRESSED, DRAW_HOVER_PRESSED:
-				metal = metal.darkened(0.2)
-		var w := clampf(minf(size.x, size.y) * 0.09, 6.0, 12.0)
-		_pipe_frame(Rect2(Vector2.ZERO, size), w, metal, accent)
-		var inner := Rect2(Vector2(w * 1.5, w * 1.5), size - Vector2(w * 3.0, w * 3.0))
-		var wide := size.x >= size.y * 1.6
-		var r: float
-		var ic: Vector2
-		var f := PipeArt.font()
-		var n := "x%d" % count
-		if wide:
-			r = minf(inner.size.y * 0.46, inner.size.x * 0.2)
-			ic = Vector2(inner.position.x + r + 2.0, inner.get_center().y)
-		else:
-			var fs_c := clampf(inner.size.x * 0.26, 14.0, 26.0)
-			r = minf(inner.size.x * 0.46, (inner.size.y - fs_c * 1.2) * 0.46)
-			ic = Vector2(inner.get_center().x, inner.position.y + (inner.size.y - fs_c * 1.1) * 0.5)
-		_porthole(ic, r, metal, kind == "freeze")
-		if kind == "freeze":
-			draw_freeze_icon(self, ic, r * 0.7, lit)
-		else:
-			draw_reveal_icon(self, ic, r * 0.7)
-		if wide:
-			var x := ic.x + r + 10.0
-			var tw := maxf(10.0, inner.end.x - x - 2.0)
-			var name_fs := int(clampf(minf(inner.size.y * 0.22, tw / 4.4), 12.0, 20.0))
-			var n_fs := int(clampf(inner.size.y * 0.4, 18.0, 36.0))
-			var top := inner.get_center().y - (name_fs + n_fs) * 0.5
-			draw_string(f, Vector2(x, top + name_fs * 0.95), label, HORIZONTAL_ALIGNMENT_LEFT, tw, name_fs, accent)
-			draw_string_outline(f, Vector2(x, top + name_fs + n_fs * 0.92), n, HORIZONTAL_ALIGNMENT_LEFT, tw, n_fs, maxi(2, n_fs / 6), Color(0, 0, 0, 0.8))
-			draw_string(f, Vector2(x, top + name_fs + n_fs * 0.92), n, HORIZONTAL_ALIGNMENT_LEFT, tw, n_fs, Color.WHITE)
-		else:
-			var fs := int(clampf(inner.size.x * 0.26, 14.0, 26.0))
-			var y := inner.end.y - fs * 0.15
-			draw_string_outline(f, Vector2(inner.position.x, y), n, HORIZONTAL_ALIGNMENT_CENTER, inner.size.x, fs, maxi(2, fs / 6), Color(0, 0, 0, 0.8))
-			draw_string(f, Vector2(inner.position.x, y), n, HORIZONTAL_ALIGNMENT_CENTER, inner.size.x, fs, Color.WHITE)
-
-	## Stroke the rounded rectangle `path` with a band `bw` wide, centred on it.
-	func _stroke(path: Rect2, bw: float, radius: float, col: Color) -> void:
-		_sb.draw_center = false
-		_sb.set_border_width_all(maxi(1, roundi(bw)))
-		_sb.set_corner_radius_all(maxi(0, roundi(radius + bw * 0.5)))
-		_sb.border_color = col
+		var bg: Color = COLORS[kind][0]
+		var trim: Color = COLORS[kind][1]
+		var dm := get_draw_mode()
+		var down := dm == DRAW_PRESSED or dm == DRAW_HOVER_PRESSED
+		if dm == DRAW_HOVER:
+			bg = bg.lightened(0.12)
+			trim = trim.lightened(0.2)
+		elif down:
+			bg = bg.darkened(0.25)
+		var base := clampf(size.y * 0.08, 3.0, 6.0)
+		var sink := base * 0.7 if down else 0.0
+		var rad := int(clampf(minf(size.x, size.y) * 0.22, 8.0, 18.0))
 		_sb.anti_aliasing = true
-		draw_style_box(_sb, path.grow(bw * 0.5))
-
-	## The card: a dark plate inside a loop of pipe with four flange collars.
-	func _pipe_frame(r: Rect2, w: float, metal: Color, accent: Color) -> void:
-		var path := r.grow(-w * 0.62)
-		var rad := w * 1.4
-		# Plate (and a soft drop shadow under the whole card).
 		_sb.draw_center = true
+		_sb.set_corner_radius_all(rad)
 		_sb.set_border_width_all(0)
-		_sb.anti_aliasing = true
-		_sb.set_corner_radius_all(roundi(rad + w * 0.5))
-		_sb.bg_color = Color(0, 0, 0, 0.45)
-		draw_style_box(_sb, Rect2(r.position + Vector2(0, w * 0.35), r.size).grow(-w * 0.1))
-		_sb.bg_color = Color("0e151a")
-		draw_style_box(_sb, path)
-		_sb.bg_color = Color(1, 1, 1, 0.03)
-		draw_style_box(_sb, Rect2(path.position, Vector2(path.size.x, path.size.y * 0.45)))
-		# The pipe: dark edges, the metal body, a coloured channel, a highlight.
-		_stroke(path, w, rad, metal.darkened(0.6))
-		_stroke(path, w * 0.74, rad, metal)
-		_stroke(path.grow(w * 0.2), w * 0.16, rad + w * 0.2, metal.lightened(0.45))
-		_stroke(path.grow(-w * 0.14), w * 0.2, rad - w * 0.14, PipeArt.fade(accent, 0.85 if lit or kind != "freeze" else 0.7))
-		if lit:
-			_stroke(path, w * 1.6, rad, Color(0.7, 0.95, 1.0, 0.25))
-		# Flange collars, bolted on, halfway along each side.
-		var c := path.get_center()
-		for spec in [[Vector2(c.x, path.position.y), true], [Vector2(c.x, path.end.y), true],
-				[Vector2(path.position.x, c.y), false], [Vector2(path.end.x, c.y), false]]:
-			var p: Vector2 = spec[0]
-			var across: Vector2 = Vector2(0, 1) if spec[1] else Vector2(1, 0)
-			var along: Vector2 = Vector2(1, 0) if spec[1] else Vector2(0, 1)
-			var half: Vector2 = along * w * 0.42 + across * w * 0.86
-			var cr := Rect2(p - Vector2(absf(half.x), absf(half.y)), Vector2(absf(half.x), absf(half.y)) * 2.0)
-			draw_rect(cr.grow(1.0), metal.darkened(0.6))
-			draw_rect(cr, metal.darkened(0.05))
-			draw_rect(Rect2(cr.position, Vector2(cr.size.x, maxf(1.0, cr.size.y * 0.18))) if spec[1] else Rect2(cr.position, Vector2(maxf(1.0, cr.size.x * 0.18), cr.size.y)), metal.lightened(0.4))
-			for sgn in [-1.0, 1.0]:
-				var bp: Vector2 = p + across * w * 0.58 * sgn
-				draw_circle(bp, maxf(1.2, w * 0.17), metal.darkened(0.6))
-				draw_circle(bp - Vector2(0.4, 0.4), maxf(0.8, w * 0.09), metal.lightened(0.5))
+		_sb.bg_color = trim.darkened(0.62)
+		draw_style_box(_sb, Rect2(0, base, size.x, size.y - base))
+		var face := Rect2(0, sink, size.x, size.y - base)
+		_sb.bg_color = bg
+		_sb.border_color = trim
+		_sb.set_border_width_all(3)
+		draw_style_box(_sb, face)
+		var inner := face.grow(-3.0)
+		_sb.set_border_width_all(0)
+		if progress > 0.0:
+			# Frozen: the ice drains towards the left as the freeze runs out.
+			var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.008)
+			_sb.set_corner_radius_all(maxi(2, rad - 3))
+			_sb.bg_color = PipeArt.fade(ICE, 0.5 + 0.15 * pulse)
+			draw_style_box(_sb, Rect2(inner.position, Vector2(maxf(4.0, inner.size.x * progress), inner.size.y)))
+			_sb.bg_color = Color(1, 1, 1, 0.18)
+			draw_style_box(_sb, Rect2(inner.position, Vector2(maxf(4.0, inner.size.x * progress), inner.size.y * 0.4)))
+		# A soft sheen on the top half.
+		_sb.set_corner_radius_all(maxi(2, rad - 3))
+		_sb.bg_color = Color(1, 1, 1, 0.05)
+		draw_style_box(_sb, Rect2(inner.position, Vector2(inner.size.x, inner.size.y * 0.45)))
+		var f := PipeArt.font()
+		var c := face.get_center()
+		if kind == "pause":
+			var h := clampf(face.size.y * 0.44, 12.0, 22.0)
+			var bw := h * 0.32
+			var gap := h * 0.32
+			var fs := int(clampf(face.size.y * 0.42, 13.0, 20.0))
+			var show_text := face.size.x >= 110.0
+			var tw := f.get_string_size("PAUSE", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x if show_text else 0.0
+			var x := c.x - (bw * 2.0 + gap + (10.0 + tw if show_text else 0.0)) * 0.5
+			_sb.set_corner_radius_all(maxi(1, int(bw * 0.45)))
+			_sb.bg_color = Color.WHITE
+			for k in 2:
+				draw_style_box(_sb, Rect2(x + k * (bw + gap), c.y - h * 0.5, bw, h))
+			if show_text:
+				_text(f, Vector2(x + bw * 2.0 + gap + 10.0, c.y + fs * 0.36), "PAUSE", fs, Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT, tw + 4.0)
+			return
+		var title := label
+		var value := "x%d" % count
+		var name_col := trim.lightened(0.25)
+		if progress > 0.0:
+			title = "FROZEN"
+			value = "%.1fs" % seconds
+			name_col = Color.WHITE
+		if face.size.y >= 70.0:
+			# Two lines: the name, and the charges (or seconds left) big below it.
+			var name_fs := int(clampf(minf(face.size.x * 0.16, face.size.y * 0.2), 13.0, 22.0))
+			var val_fs := int(clampf(minf(face.size.x * 0.28, face.size.y * 0.36), 18.0, 40.0))
+			var top := c.y - (name_fs + val_fs * 1.05) * 0.5
+			_text(f, Vector2(face.position.x, top + name_fs * 0.9), title, name_fs, name_col, HORIZONTAL_ALIGNMENT_CENTER, face.size.x)
+			_text(f, Vector2(face.position.x, top + name_fs * 1.05 + val_fs * 0.92), value, val_fs, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, face.size.x)
+		else:
+			# One line: the name on the left, the charges on the right.
+			var fs := int(clampf(minf(face.size.y * 0.36, face.size.x * 0.12), 13.0, 22.0))
+			var y := c.y + fs * 0.36
+			_text(f, Vector2(inner.position.x + 10.0, y), title, fs, name_col, HORIZONTAL_ALIGNMENT_LEFT, inner.size.x - 20.0)
+			_text(f, Vector2(inner.position.x + 10.0, y), value, int(fs * 1.15), Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, inner.size.x - 20.0)
 
-	## A bolted porthole: a metal flange ring with bolts and a dark glass.
-	func _porthole(c: Vector2, r: float, metal: Color, icy: bool) -> void:
-		draw_circle(c + Vector2(r * 0.05, r * 0.08), r * 1.02, Color(0, 0, 0, 0.45))
-		draw_circle(c, r, metal.darkened(0.6))
-		draw_circle(c, r * 0.93, metal)
-		draw_arc(c, r * 0.86, PI * 1.05, PI * 1.7, 24, metal.lightened(0.45), maxf(1.5, r * 0.06), true)
-		for k in 8:
-			var bp := c + Vector2.from_angle(k * TAU / 8.0 + PI / 8.0) * r * 0.83
-			draw_circle(bp, maxf(1.5, r * 0.07), metal.darkened(0.6))
-			draw_circle(bp - Vector2(0.5, 0.5), maxf(1.0, r * 0.035), metal.lightened(0.5))
-		draw_circle(c, r * 0.72, metal.darkened(0.65))
-		draw_circle(c, r * 0.68, Color("0a2436") if icy else Color("2b1f06"))
-		draw_circle(c - Vector2(r, r) * 0.2, r * 0.32, Color(1, 1, 1, 0.05))
-
-	## Flow-freeze: a six-armed snowflake behind frosted glass.
-	static func draw_freeze_icon(ci: CanvasItem, c: Vector2, r: float, glow := false) -> void:
-		if glow:
-			ci.draw_circle(c, r * 1.05, Color(0.6, 0.92, 1.0, 0.3))
-		ci.draw_circle(c, r * 0.94, Color("12405f"))
-		for layer in 2:
-			var off := Vector2(r * 0.04, r * 0.06) if layer == 0 else Vector2.ZERO
-			var col := Color("041622") if layer == 0 else (Color.WHITE if glow else Color("e9fbff"))
-			var w := maxf(2.0, r * 0.11)
-			var o := c + off
-			for k in 6:
-				var d := Vector2.from_angle(k * PI / 3.0 - PI / 2.0)
-				var pp := Vector2(-d.y, d.x)
-				ci.draw_line(o, o + d * r * 0.72, col, w, true)
-				for spec in [[0.32, 0.22], [0.54, 0.16]]:
-					var m: Vector2 = o + d * r * spec[0]
-					var L: float = r * spec[1]
-					ci.draw_line(m, m + (d + pp).normalized() * L, col, w * 0.8, true)
-					ci.draw_line(m, m + (d - pp).normalized() * L, col, w * 0.8, true)
-				ci.draw_circle(o + d * r * 0.74, w * 0.75, col)
-			ci.draw_circle(o, r * 0.14, col)
-		ci.draw_circle(c, r * 0.06, Color("12405f"))
-
-	## Reveal: an open eye with a few scan rays, behind amber glass.
-	static func draw_reveal_icon(ci: CanvasItem, c: Vector2, r: float) -> void:
-		ci.draw_circle(c, r * 0.94, Color("4d3a0c"))
-		var ec := c + Vector2(0, r * 0.12)
-		var ew := r * 0.78
-		var eh := r * 0.46
-		var pts := PackedVector2Array()
-		for i in 25:
-			var t := i / 24.0
-			pts.append(ec + Vector2(lerpf(-ew, ew, t), -eh * sin(t * PI)))
-		for i in range(1, 24):
-			var t := 1.0 - i / 24.0
-			pts.append(ec + Vector2(lerpf(-ew, ew, t), eh * sin(t * PI)))
-		var shadow := PackedVector2Array()
-		for p in pts:
-			shadow.append(p + Vector2(r * 0.04, r * 0.06))
-		ci.draw_colored_polygon(shadow, Color(0, 0, 0, 0.5))
-		ci.draw_colored_polygon(pts, Color("fff7e4"))
-		ci.draw_circle(ec, eh * 0.86, Color("155e96"))
-		ci.draw_circle(ec, eh * 0.7, Color("3ab4ff"))
-		ci.draw_circle(ec, eh * 0.36, Color("081420"))
-		ci.draw_circle(ec + Vector2(-eh * 0.3, -eh * 0.3), eh * 0.16, Color.WHITE)
-		var closed := pts.duplicate()
-		closed.append(pts[0])
-		ci.draw_polyline(closed, Color("1c1404"), maxf(2.0, r * 0.08), true)
-		for a in [-0.6, 0.0, 0.6]:
-			var d := Vector2.from_angle(-PI / 2.0 + a)
-			ci.draw_line(ec + d * r * 0.62, ec + d * r * 0.84, Color("ffe7a0"), maxf(2.0, r * 0.09), true)
+	func _text(f: Font, pos: Vector2, s: String, fs: int, col: Color, align: int, w: float) -> void:
+		draw_string_outline(f, pos, s, align, w, fs, maxi(2, fs / 6), Color(0, 0, 0, 0.8))
+		draw_string(f, pos, s, align, w, fs, col)
 
 
 ## A game counter for HEIGHT or SCORE: a rounded steel plate with a coloured
@@ -217,24 +153,42 @@ class StatPlate:
 		var c := icon_at
 		var k := icon_r
 		if icon == "up":
-			draw_colored_polygon(PackedVector2Array([c + Vector2(0, -k), c + Vector2(k, k * 0.2), c + Vector2(k * 0.35, k * 0.2),
+			GameUI.smooth_poly(self, PackedVector2Array([c + Vector2(0, -k), c + Vector2(k, k * 0.2), c + Vector2(k * 0.35, k * 0.2),
 					c + Vector2(k * 0.35, k), c + Vector2(-k * 0.35, k), c + Vector2(-k * 0.35, k * 0.2), c + Vector2(-k, k * 0.2)]), trim)
 		else:
 			var pts := PackedVector2Array()
 			for i in 10:
 				pts.append(c + Vector2.from_angle(-PI / 2.0 + i * PI / 5.0) * (k if i % 2 == 0 else k * 0.45))
-			draw_colored_polygon(pts, trim)
+			GameUI.smooth_poly(self, pts, trim)
 
 
-## "▶▶ FAST x4" shown at the top of the board while the water is sped up.
+## "▶▶ FAST x4.4  x2.2 POINTS" at the top of the board while the water is sped
+## up, with a bar along the bottom that fills as the hold ramps up to its max.
 class SpeedBadge:
 	extends Control
+	var game
+
+	static func mult(m: float) -> String:
+		return "%d" % roundi(m) if absf(m - roundf(m)) < 0.05 else "%.1f" % m
+
+	func _texts() -> Array:
+		return ["FAST x" + mult(game.hold_speed_mult()), "x%s POINTS" % mult(game.hold_score_mult())]
+
+	## The width that fits the text at height h.
+	func width_for(h: float) -> float:
+		var f := PipeArt.font()
+		var fs := int(h * 0.46)
+		var t := _texts()
+		return h * 0.45 + h * 0.42 * 2.3 + f.get_string_size(t[0], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 12.0 \
+				+ f.get_string_size(t[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + h * 0.5
 
 	func _draw() -> void:
 		var r := Rect2(Vector2.ZERO, size)
+		var gold := Color("ffc928")
+		var ramp: float = game.hold_ramp()
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color(0.05, 0.07, 0.09, 0.85)
-		sb.border_color = Color("ffc928")
+		sb.border_color = gold.lerp(Color.WHITE, 0.5 * ramp)
 		sb.set_border_width_all(2)
 		sb.set_corner_radius_all(int(size.y * 0.5))
 		sb.anti_aliasing = true
@@ -243,15 +197,20 @@ class SpeedBadge:
 		var x := size.y * 0.45
 		for i in 2:
 			var ox := x + i * h * 0.75
-			draw_colored_polygon(PackedVector2Array([Vector2(ox, size.y * 0.5 - h * 0.5), Vector2(ox + h * 0.7, size.y * 0.5),
-					Vector2(ox, size.y * 0.5 + h * 0.5)]), Color("ffc928"))
+			GameUI.smooth_poly(self, PackedVector2Array([Vector2(ox, size.y * 0.5 - h * 0.5), Vector2(ox + h * 0.7, size.y * 0.5),
+					Vector2(ox, size.y * 0.5 + h * 0.5)]), gold)
 		var f := PipeArt.font()
 		var fs := int(size.y * 0.46)
 		var tx := x + h * 2.3
-		var txt := "FAST x%d" % int(Tuning.HOLD_SPEED_MULT)
-		draw_string(f, Vector2(tx, size.y * 0.5 + fs * 0.36), txt, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 8.0, fs, Color.WHITE)
-		var tw := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_string(f, Vector2(tx + tw + 12.0, size.y * 0.5 + fs * 0.36), "%dx POINTS" % Tuning.HOLD_SCORE_MULT, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - tw - 18.0, fs, Color("ffc928"))
+		var t := _texts()
+		draw_string(f, Vector2(tx, size.y * 0.5 + fs * 0.36), t[0], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		var tw := f.get_string_size(t[0], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string(f, Vector2(tx + tw + 12.0, size.y * 0.5 + fs * 0.36), t[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gold)
+		# The ramp: fills up over the tubes you keep holding through.
+		var track := Rect2(size.y * 0.5, size.y - 6.0, size.x - size.y, 2.5)
+		draw_rect(track, Color(1, 1, 1, 0.12))
+		if ramp > 0.0:
+			draw_rect(Rect2(track.position, Vector2(track.size.x * ramp, track.size.y)), gold.lerp(Color.WHITE, 0.4 * ramp))
 
 
 var game  ## The Game node (main.gd).
@@ -261,14 +220,15 @@ var stat_values := {}     ## "HEIGHT" / "SCORE" -> value Label.
 var stat_captions := {}   ## "HEIGHT" / "SCORE" -> caption Label.
 var stat_plates := {}     ## "HEIGHT" / "SCORE" -> StatPlate behind them.
 var _stats_key := ""
-var btn_freeze: IconButton
-var btn_reveal: IconButton
+var btn_freeze: HudButton
+var btn_reveal: HudButton
+var btn_pause: HudButton
 var speed_badge: SpeedBadge
 var banner: Label
 var toast: Label
 var title_screen: Control
 var new_game_button: Button
-var watch_ai_button: Button    ## Small: starts a game the AI plays.
+var solver_button: Button      ## Small: starts a game the solver (the AI player) plays.
 var best_label: Label         ## The best score on the menu, above the nameplate.
 var _title_box: VBoxContainer
 var _best_caption: Label
@@ -280,6 +240,7 @@ var over_reason: Label
 var over_score: Label
 var over_height: Label
 var over_best: Label
+var over_speed: Label        ## Actions per second (average taps that did something).
 var over_new: Label
 var _last_view := Vector2.ZERO
 var _last_portrait := false
@@ -446,11 +407,11 @@ func _button(text: String, cb: Callable, min_w := 260) -> Button:
 	return b
 
 
-func _icon_button(kind: String, cb: Callable) -> IconButton:
-	var b := IconButton.new()
+func _hud_button(kind: String, cb: Callable) -> HudButton:
+	var b := HudButton.new()
 	b.kind = kind
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(52, 52)
+	b.custom_minimum_size = Vector2(24, 24)  # The layout sizes it.
 	b.pressed.connect(cb)
 	return b
 
@@ -501,16 +462,18 @@ func _build_hud() -> void:
 		stat_values[key] = val
 		stat_plates[key] = plate
 	# Powers: one of each to start, another pair every 100 rows.
-	btn_freeze = _icon_button("freeze", func(): game.use_freeze())
-	btn_reveal = _icon_button("reveal", func(): game.use_reveal())
+	btn_freeze = _hud_button("freeze", func(): game.use_freeze())
+	btn_reveal = _hud_button("reveal", func(): game.use_reveal())
+	btn_pause = _hud_button("pause", func(): game.toggle_pause())
 	btn_freeze.label = "FREEZE"
 	btn_reveal.label = "REVEAL"
-	for b in [btn_freeze, btn_reveal]:
+	for b in [btn_freeze, btn_reveal, btn_pause]:
 		for st in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
 			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 		b.visible = false
 		root.add_child(b)
 	speed_badge = SpeedBadge.new()
+	speed_badge.game = game
 	speed_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	speed_badge.visible = false
 	root.add_child(speed_badge)
@@ -559,10 +522,10 @@ func _build_title() -> void:
 	new_game_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_style_button(new_game_button, STEEL, HAZARD)
 	vb.add_child(new_game_button)
-	watch_ai_button = _button("WATCH AI", func(): game.start_run(true), 200)
-	watch_ai_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_style_button(watch_ai_button, Color("1d3a1f"), Color("5fbf55"))
-	vb.add_child(watch_ai_button)
+	solver_button = _button("SOLVER", func(): game.start_run(true), 200)
+	solver_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_style_button(solver_button, Color("1d3a1f"), Color("5fbf55"))
+	vb.add_child(solver_button)
 
 
 func _build_pause() -> void:
@@ -597,6 +560,8 @@ func _build_over() -> void:
 	vb.add_child(over_height)
 	over_best = _label("", 26, Color("ffd23a"), 6)
 	vb.add_child(over_best)
+	over_speed = _label("", 22, Color("9dff8a"), 6)
+	vb.add_child(over_speed)
 	over_new = _label("NEW BEST!", 36, Color("ffd23a"), 10)
 	vb.add_child(over_new)
 	var sp := Control.new()
@@ -628,12 +593,13 @@ func show_pause(p: bool) -> void:
 	pause_screen.visible = p
 
 
-func show_game_over(reason: String, score: int, height: int, best: int, is_new: bool) -> void:
+func show_game_over(reason: String, score: int, height: int, best: int, is_new: bool, aps := 0.0) -> void:
 	over_reason.text = reason
 	over_reason.visible = reason != ""
 	over_score.text = "%d" % score
 	over_height.text = "HEIGHT  %d rows" % height
 	over_best.text = "BEST  %d" % best
+	over_speed.text = "%.1f ACTIONS PER SECOND" % aps
 	over_new.visible = is_new
 	over_screen.visible = true
 	over_screen.modulate.a = 0.0
@@ -763,8 +729,8 @@ func _place_stats() -> void:
 
 func _refresh_powers() -> void:
 	var shown: bool = game.powers_shown()
-	for e in [[btn_freeze, game.freeze_rect, game.freezes], [btn_reveal, game.reveal_rect, game.reveals]]:
-		var b: IconButton = e[0]
+	for e in [[btn_freeze, game.freeze_rect, game.freezes], [btn_reveal, game.reveal_rect, game.reveals], [btn_pause, game.pause_rect, 1]]:
+		var b: HudButton = e[0]
 		if b.visible != shown:
 			b.visible = shown
 		if not shown:
@@ -776,12 +742,15 @@ func _refresh_powers() -> void:
 		if b.count != e[2]:
 			b.count = e[2]
 			b.queue_redraw()
-		var dim := 1.0 if e[2] > 0 else 0.4
+		var dim := 1.0 if e[2] > 0 or (b == btn_freeze and game.freeze_timer > 0.0) else 0.4
 		if b.modulate.a != dim:
 			b.modulate.a = dim
-	var lit: bool = game.freeze_timer > 0.0
-	if btn_freeze.lit != lit:
-		btn_freeze.lit = lit
+	# A running freeze: ice on the Freeze button, draining as it runs out.
+	var left: float = game.freeze_timer
+	var prog := clampf(left / Tuning.FREEZE_TIME, 0.0, 1.0) if left > 0.0 else 0.0
+	if btn_freeze.progress != prog:
+		btn_freeze.progress = prog
+		btn_freeze.seconds = left
 		btn_freeze.queue_redraw()
 	# FAST badge while the water is sped up.
 	var fast: bool = game.speed_held()
@@ -789,7 +758,8 @@ func _refresh_powers() -> void:
 		speed_badge.visible = fast
 	if fast:
 		var b: Rect2 = game.board_rect
-		var sz := Vector2(260, 34)
+		var sz := Vector2(minf(b.size.x - 16.0, roundf(speed_badge.width_for(34.0))), 34)
+		speed_badge.queue_redraw()
 		var y := b.position.y + 10.0
 		if game.tutorial.active and game.tutorial.visible:
 			y = game.tutorial._panel.get_global_rect().end.y + 8.0
@@ -808,7 +778,7 @@ func _apply_layout() -> void:
 		l.add_theme_constant_override("outline_size", maxi(2, int(e[2] * k)))
 	for e in _key_buttons:
 		(e[0] as Button).text = e[2] if touch else e[1]
-	# Menu: best score, nameplate, NEW GAME and the small WATCH AI must fit.
+	# Menu: best score, nameplate, NEW GAME and the small SOLVER must fit.
 	var short := vs.y < 600.0
 	var bh := 56.0 if short else 74.0
 	var bw := minf(320.0, vs.x - 64.0)
@@ -820,8 +790,8 @@ func _apply_layout() -> void:
 	var ai_h := 40.0 if short else 46.0
 	var used := bh + ai_h + 3.0 * sep + best_h + 60.0
 	logo.fit_width(vs.x - 24.0, maxf(60.0, minf(vs.y * (0.3 if short else 0.36), vs.y - used)))
-	watch_ai_button.custom_minimum_size = Vector2(minf(220.0, bw * 0.7), ai_h)
-	watch_ai_button.add_theme_font_size_override("font_size", 18 if short else 20)
+	solver_button.custom_minimum_size = Vector2(minf(220.0, bw * 0.7), ai_h)
+	solver_button.add_theme_font_size_override("font_size", 18 if short else 20)
 	over_reason.custom_minimum_size = Vector2(minf(420.0, vs.x - 96.0), 0)
 	_stats_key = ""
 	new_game_button.custom_minimum_size = Vector2(bw, bh)

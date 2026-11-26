@@ -24,12 +24,15 @@ const UI_BASE_MIN := 480             ## ...and on phones, so text and buttons st
 # --- Flow -------------------------------------------------------------------
 const COUNTDOWN_TIME := 10.0         ## Seconds before the goo starts flowing.
 const BASE_SEGMENT_TIME := 2.6       ## Seconds to fill one tile at speed 1.0x.
-const SPEEDUP_PER_ROW := 0.01        ## Speed gained per row climbed: +1% of the starting speed per row...
-const SPEEDUP_MAX_ROW := 300         ## ...up to this row (4x the starting speed); flat after that.
+const SPEED_MAX := 8.0               ## Top speed of the water (x the starting speed), without holding...
+const SPEED_MAX_ROW := 800           ## ...reached at this row, rising evenly from 1x (about +0.9% per row); flat after.
 const FAST_FORWARD_MULT := 5.0       ## Fast-forward flow multiplier (debug / tests).
-const HOLD_SPEED_MULT := 4.0         ## Water (and countdown) speed while the screen is held.
+const HOLD_SPEED_MULT := 4.0         ## Water (and countdown) speed when you start holding the screen...
+const HOLD_SPEED_MAX := 8.0          ## ...rising with every tube the water fills while you keep holding, up to this.
+const HOLD_SCORE_MULT := 2.0         ## Points per tube when you start holding...
+const HOLD_SCORE_MAX := 4.0          ## ...rising the same way, up to this.
+const HOLD_RAMP := 0.1               ## Each tube filled while holding adds this (10%) of the starting x to both.
 const HOLD_DELAY := 0.3              ## Seconds a press must last before it counts as a hold.
-const HOLD_SCORE_MULT := 2           ## Points per tube are multiplied by this while holding.
 const RESERVOIR_FILL_FACTOR := 4.0   ## Reservoir tiles take this many times longer to fill.
 const NARROW_FILL_FACTOR := 2.5      ## Narrow pipes take this many times longer to fill.
 const NARROW_CHANCE := 0.16          ## Chance a pipe (hidden or in the queue) is narrow.
@@ -60,7 +63,7 @@ const POWER_AWARD_ROWS := 100        ## Every this many rows: +1 Flow-freeze and
 const FREEZE_TIME := 8.0             ## Seconds the flow stays frozen.
 
 # --- Scoring ----------------------------------------------------------------
-## Points only for progress: no multipliers, bonuses or penalties.
+## Points only for tubes filled (more while holding to speed up): no bonuses or penalties.
 const SCORE_TUBE := 1                ## Per tube the water fills (a cross filled both ways counts twice).
 
 # --- Camera / memory --------------------------------------------------------

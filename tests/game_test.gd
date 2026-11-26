@@ -97,13 +97,13 @@ func _run() -> void:
 	check(game.state == S.TITLE, "starts on the title screen")
 	check(game.ui.title_screen.visible, "title overlay visible")
 
-	# --- the menu: best score, NEW GAME and a small WATCH AI; clicking elsewhere does nothing ---
+	# --- the menu: best score, NEW GAME and a small SOLVER; clicking elsewhere does nothing ---
 	var screen := Rect2(Vector2.ZERO, game.view_size)
 	var ng: Button = game.ui.new_game_button
-	var wa: Button = game.ui.watch_ai_button
+	var wa: Button = game.ui.solver_button
 	check(ng.is_visible_in_tree() and screen.encloses(ng.get_global_rect()) and ng.text == "NEW GAME", "the menu shows NEW GAME on screen")
 	check(wa.is_visible_in_tree() and screen.encloses(wa.get_global_rect()) and wa.get_global_rect().position.y >= ng.get_global_rect().end.y
-			and wa.size.x < ng.size.x, "a smaller WATCH AI button sits under it")
+			and wa.size.x < ng.size.x and wa.text == "SOLVER", "a smaller SOLVER button sits under it")
 	check(not "difficulty_buttons" in game.ui and not "difficulty" in game, "no difficulty levels")
 	check(not (load("res://scripts/station_logo.gd") as Script).get_script_constant_map().has("SUBTITLE"), "the nameplate has no subtitle")
 	var logo_top: float = game.ui.logo.get_global_rect().position.y
@@ -157,6 +157,19 @@ func _run() -> void:
 	key(KEY_ESCAPE)
 	await frames(1)
 	check(not game.paused, "Esc resumes")
+	var pb: Button = game.ui.btn_pause
+	check(pb.is_visible_in_tree() and Rect2(Vector2.ZERO, game.view_size).encloses(pb.get_global_rect())
+			and not pb.get_global_rect().intersects(game.board_rect) and pb.get_global_rect().end.y <= (game.queue_slot_rects()[0] as Rect2).position.y + 0.5,
+			"a pause button sits in the panel, above the hand")
+	click(pb.get_global_rect().get_center())
+	await frames(1)
+	check(game.paused and game.ui.pause_screen.visible, "the pause button pauses the game")
+	var cd_p: float = game.countdown
+	await frames(30)
+	check(game.countdown == cd_p, "nothing moves while paused")
+	game.toggle_pause()
+	await frames(1)
+	check(not game.paused, "RESUME carries on")
 	key(KEY_M)
 	await frames(1)
 	check(game.sfx.muted, "M mutes")
@@ -231,11 +244,11 @@ func _run() -> void:
 	check(Zones.title(1) == "ZONE 2" and Zones.title(300) == "ZONE 255", "zone banners are just numbers, up to ZONE 255")
 	# flow.segments also counts the pump itself, which scores nothing.
 	check(game.score == (game.flow.segments - 1) * Tuning.SCORE_TUBE, "score is exactly the tubes filled, nothing per row (height %d, score %d, tubes %d)" % [game.height, game.score, game.flow.segments - 1])
-	check(game.height_speed() > 2.5, "flow speeds up with height (%.2fx)" % game.height_speed())
+	check(game.height_speed() > 2.0, "flow speeds up with height (%.2fx)" % game.height_speed())
 	var h_was: int = game.height
-	for spec in [[0, 1.0], [100, 2.0], [200, 3.0], [300, 4.0], [450, 4.0]]:
+	for spec in [[0, 1.0], [400, 4.5], [800, 8.0], [1200, 8.0]]:
 		game.height = spec[0]
-		check(is_equal_approx(game.height_speed(), spec[1]), "speed is +1%% per row up to row 300: row %d -> %.2fx (got %.2fx)" % [spec[0], spec[1], game.height_speed()])
+		check(is_equal_approx(game.height_speed(), spec[1]), "speed rises evenly to 8x at row 800: row %d -> %.2fx (got %.2fx)" % [spec[0], spec[1], game.height_speed()])
 	game.height = h_was
 	check(peak_rows <= Tuning.KEEP_ROWS_BELOW + 40, "rows in memory stay bounded (peak %d)" % peak_rows)
 	check(game.grid.floor_row > 100, "old rows discarded (floor at %d)" % game.grid.floor_row)
@@ -398,6 +411,11 @@ func _run() -> void:
 	click(game.ui.btn_freeze.get_global_rect().get_center())
 	await frames(1)
 	check(game.freeze_timer > 0.0 and game.freezes == 1, "the freeze button starts a Flow-freeze")
+	await frames(30)
+	check(game.ui.btn_freeze.progress > 0.8 and game.ui.btn_freeze.progress < 1.0 and is_equal_approx(game.ui.btn_freeze.progress, game.freeze_timer / Tuning.FREEZE_TIME),
+			"the Freeze button fills with ice that drains as the freeze runs out (%.2f)" % game.ui.btn_freeze.progress)
+	check(game.ui.btn_freeze.text == "" and game.ui.btn_reveal.text == "" and not "draw_freeze_icon" in game.ui.btn_freeze,
+			"Freeze and Reveal are plain text buttons")
 	var frozen_at := [game.flow.row, game.flow.col, game.flow.progress]
 	await frames(60)
 	check([game.flow.row, game.flow.col, game.flow.progress] == frozen_at and game.effective_speed() == 0.0, "the water stands still while frozen")
@@ -437,9 +455,21 @@ func _run() -> void:
 	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
 	sc0 = game.score
 	game._handle_event({"type": "filled", "tile": tube, "col": 0, "row": 1, "channel": 0})
-	check(game.score - sc0 == Tuning.SCORE_TUBE * 2, "a tube scores 2x while you hold to speed up")
+	check(game.score - sc0 == Tuning.SCORE_TUBE * 2, "the first tube scores 2x while you hold to speed up")
+	check(is_equal_approx(game.effective_speed(), game.height_speed() * 4.4) and is_equal_approx(game.hold_score_mult(), 2.2),
+			"every tube you hold through adds 10%%: x4.4 speed, 2.2x points (got x%.2f, %.2fx)" % [game.effective_speed() / game.height_speed(), game.hold_score_mult()])
+	sc0 = game.score
+	for i in 30:
+		game._handle_event({"type": "filled", "tile": tube, "col": 0, "row": 1, "channel": 0})
+	await frames(1)
+	check(is_equal_approx(game.effective_speed(), game.height_speed() * 8.0) and is_equal_approx(game.hold_score_mult(), 4.0),
+			"it tops out at x8 speed and 4x points (x%.2f, %.2fx)" % [game.effective_speed() / game.height_speed(), game.hold_score_mult()])
+	# Tubes 2-10 pay 2.2 ... 3.8 (27 in all, plus 0.0 carried), then 21 more at 4.
+	check(game.score - sc0 == 27 + 21 * 4, "points per tube rise 2.2, 2.4 ... up to 4 (got %d)" % (game.score - sc0))
+	check(game.ui.speed_badge.visible and game.ui.speed_badge._texts() == ["FAST x8", "x4 POINTS"], "the FAST badge shows the current multipliers")
 	press_at(spot, false)
 	await frames(1)
+	check(game.hold_tubes == 0 and is_equal_approx(game.hold_speed_mult(), Tuning.HOLD_SPEED_MULT), "letting go resets the ramp: the next hold starts at x4 again")
 	key_state(KEY_F, true)
 	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
 	check(game.speed_held(), "holding F does the same on a keyboard")
@@ -521,17 +551,17 @@ func _run() -> void:
 	check(not tut.active and not game.gen.tutorial_start, "the next game is a normal, unprepared one")
 	check(not "_skip" in tut, "the walkthrough has no SKIP button")
 
-	# --- WATCH AI: a bot that plans routes and plays through taps, at a human pace ---
+	# --- SOLVER: a bot that plans routes and plays through taps, at a human pace ---
 	seed(4242)
 	game.rng.seed = 4242
-	game.tutorial_pending = true  # A WATCH AI game never shows the walkthrough.
+	game.tutorial_pending = true  # A SOLVER game never shows the walkthrough.
 	game.go_to_title()
 	await frames(1)
 	var best_before := SaveData.load_best()
-	click(game.ui.watch_ai_button.get_global_rect().get_center())
+	click(game.ui.solver_button.get_global_rect().get_center())
 	await frames(2)
 	check(game.state == S.COUNTDOWN and game.ai.enabled and not game.tutorial.active and not game.gen.tutorial_start,
-			"WATCH AI starts a game the AI plays (no walkthrough, normal board)")
+			"SOLVER starts a game the AI plays (no walkthrough, normal board)")
 	game.tutorial_pending = false
 	click(tile_center(0, 2))
 	await frames(1)
@@ -585,9 +615,12 @@ func _run() -> void:
 		game._game_over({"reason": "rock", "col": 3, "row": game.flow.row, "exit": Pieces.N})
 		await frames(120)
 	check(SaveData.load_best() == best_before, "a run the AI played doesn't set a best score")
+	check(game.ui.over_screen.visible and game.actions > 0 and game.ui.over_speed.text == "%.1f ACTIONS PER SECOND" % game.actions_per_second()
+			and game.actions_per_second() > 0.5 and game.actions_per_second() < 4.0,
+			"the game-over screen shows the average actions per second (%s)" % game.ui.over_speed.text)
 	game.play_again()
 	await frames(1)
-	check(game.ai.enabled, "PLAY AGAIN after a WATCH AI game watches again")
+	check(game.ai.enabled, "PLAY AGAIN after a SOLVER game watches again")
 	game.go_to_title()
 	await frames(1)
 	check(not game.ai.enabled, "back on the menu the AI stops")
