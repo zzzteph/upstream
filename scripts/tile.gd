@@ -25,7 +25,6 @@ var placed_at := -100.0        ## Game time of placement (pop animation).
 var rnd := 0                   ## Per-tile random value for visuals.
 var spine := false             ## On the generator's guaranteed path (debug/tests).
 var hidden := false            ## Unlock mode: still face-down (locked).
-var alarm := false             ## Unlock mode: a trap that goes off when unlocked.
 var flip_at := -100.0          ## Game time it was unlocked (flip animation).
 var shape := PackedVector2Array()  ## Rock outline in tile units.
 

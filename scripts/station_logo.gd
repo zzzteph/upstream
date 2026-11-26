@@ -66,11 +66,15 @@ func _draw() -> void:
 	var f := PipeArt.font()
 	var fs := _font_size(k)
 	# Hard drop shadow, then the plate.
-	draw_rect(Rect2(plate.position + Vector2(7, 7) * k, plate.size), Color(0, 0, 0, 0.6))
+	var shadow := StyleBoxFlat.new()
+	shadow.bg_color = Color(0, 0, 0, 0.6)
+	shadow.set_corner_radius_all(int(16.0 * k))
+	shadow.anti_aliasing = true
+	draw_style_box(shadow, Rect2(plate.position + Vector2(7, 7) * k, plate.size))
 	_sb.bg_color = STEEL
 	_sb.border_color = STEEL_DARK
 	_sb.set_border_width_all(int(maxf(2.0, 4.0 * k)))
-	_sb.set_corner_radius_all(int(4.0 * k))
+	_sb.set_corner_radius_all(int(16.0 * k))
 	draw_style_box(_sb, plate)
 	draw_line(plate.position + Vector2(6, 6) * k, Vector2(plate.end.x - 6.0 * k, plate.position.y + 6.0 * k), STEEL_LIGHT, maxf(2.0, 3.0 * k))
 	# Hazard strip along the bottom.

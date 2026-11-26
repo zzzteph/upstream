@@ -683,13 +683,6 @@ func _draw_queue_bg(ci: CanvasItem) -> void:
 		_text(ci, f, Vector2(s0.get_center().x, s0.position.y - 10), title, 20, Color(1, 1, 1, 0.8))
 	else:
 		_text(ci, f, Vector2(s0.get_center().x, s0.position.y - 4), title, 15, Color(1, 1, 1, 0.8))
-	# A recessed plate behind the height and score (the labels are UI nodes on top).
-	var st: Rect2 = game.stats_rect
-	if st.size.x > 20.0:
-		_sb.bg_color = Color(0, 0, 0, 0.28)
-		_sb.set_corner_radius_all(10)
-		_sb.set_border_width_all(0)
-		ci.draw_style_box(_sb, st.grow(2.0))
 
 
 func _draw_queue_icons(ci: CanvasItem) -> void:

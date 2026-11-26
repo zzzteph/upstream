@@ -38,7 +38,7 @@ func _run() -> void:
 			var max_idle := 0
 			var last_actions := 0
 			var dumped := false
-			while game.state != S.GAMEOVER and frames < 60 * 900 and game.height < 250:
+			while game.state != S.GAMEOVER and frames < 60 * 1200 and game.height < 400:
 				await process_frame
 				if game.state == S.SPILL and not dumped:
 					dumped = true

@@ -44,10 +44,6 @@ const PIECE_WEIGHTS := [16, 16, 14, 14, 14, 14, 5]
 const DEFAULT_MODE := "unlock"       ## "unlock" (face-down tiles you flip and move) or "classic" (piece queue).
 const UNLOCK_PIECE_FILL := 0.72      ## Chance a closed block hides a pipe (otherwise an empty slot).
 const UNLOCK_SPINE_PIECE_CHANCE := 0.5 ## Chance a guaranteed-path tile already hides the pipe it needs.
-const ALARM_START_ROW := 15          ## Alarm traps appear from this row.
-const ALARM_CHANCE := 0.07           ## Chance per hidden empty slot to be an alarm.
-const ALARM_SURGE_TIME := 4.0        ## Seconds the goo surges after an alarm.
-const ALARM_SURGE_MULT := 1.8        ## Flow multiplier during a surge.
 const FLIP_TIME := 0.3               ## Seconds of the unlock flip animation.
 
 # --- Difficulty -------------------------------------------------------------
@@ -57,9 +53,9 @@ const DIFFICULTY_SPEED := {"easy": 0.5, "medium": 1.0, "hard": 1.25}
 const DEFAULT_DIFFICULTY := "medium" ## Used by Enter on the menu until a button is picked.
 
 # --- AI player ------------------------------------------------------------
-const AI_MOVE_SPEED := 900.0         ## Pointer speed in px/s (plus a short settle time per move).
-const AI_THINK_MIN := 0.12           ## Pause between actions, seconds (random in this range).
-const AI_THINK_MAX := 0.32
+const AI_MOVE_SPEED := 1400.0        ## Pointer speed in px/s (plus a short settle time per move).
+const AI_THINK_MIN := 0.06           ## Pause between actions, seconds (random in this range).
+const AI_THINK_MAX := 0.18
 
 # --- Milestone powers -------------------------------------------------------
 const START_POWERS := 1              ## Flow-freezes and Reveals you start every run with.

@@ -375,9 +375,7 @@ func test_unlock_generator_solvable() -> void:
 	var seeds := 120
 	var bad_hidden := 0
 	var bad_stock := 0
-	var bad_alarm := 0
 	var bad_run := 0
-	var alarms := 0
 	var narrows := 0
 	for s in seeds:
 		var g := Grid.new()
@@ -393,10 +391,6 @@ func test_unlock_generator_solvable() -> void:
 					bad_hidden += 1
 				if t.narrow:
 					narrows += 1
-				if t.alarm:
-					alarms += 1
-					if t.spine or t.piece >= 0:
-						bad_alarm += 1
 				if t.kind == Tile.EMPTY and not t.fixed and t.piece >= 0:
 					stock[t.piece] = int(stock.get(t.piece, 0)) + 1
 			var need: Dictionary = gen.spine_needs[r]
@@ -440,7 +434,7 @@ func test_unlock_generator_solvable() -> void:
 			bad_run += 1
 	check(bad_hidden == 0, "unlock mode: every tile above the pump starts locked (%d not)" % bad_hidden)
 	check(bad_stock == 0, "unlock mode: each row hides the pipes its path needs (%d short)" % bad_stock)
-	check(bad_alarm == 0 and alarms > 0, "unlock mode: alarms sit only in empty off-path slots (%d bad, %d total)" % [bad_alarm, alarms])
+	check(not "alarm" in Tile.new(), "unlock mode: no alarm traps under the hatches")
 	check(bad_run == 0, "unlock mode: swapping within each row gets the goo to row %d on every seed (%d failed)" % [rows, bad_run])
 	check(narrows > 0, "unlock mode: narrow pipes turn up (%d)" % narrows)
 	var g2 := empty_grid(4)

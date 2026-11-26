@@ -176,8 +176,3 @@ func _build_all() -> void:
 	_tone(b, 0.1, 0.55, 600.0, 3600.0, "sine", 0.12, 0.02, 1.5)
 	streams["reveal"] = _to_stream(b)
 
-	# Alarm: a two-tone siren.
-	b = _buffer(0.9)
-	for i in 4:
-		_tone(b, i * 0.22, 0.2, 880.0 if i % 2 == 0 else 620.0, 880.0 if i % 2 == 0 else 620.0, "square", 0.16, 0.005, 0.6)
-	streams["alarm"] = _to_stream(b)

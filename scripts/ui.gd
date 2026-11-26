@@ -180,6 +180,52 @@ class IconButton:
 			ci.draw_line(ec + d * r * 0.62, ec + d * r * 0.84, Color("ffe7a0"), maxf(2.0, r * 0.09), true)
 
 
+## A game counter for HEIGHT or SCORE: a rounded steel plate with a coloured
+## trim and an icon, and the number in a dark recessed display window. The
+## caption and number are Labels placed on top (see _place_stats).
+class StatPlate:
+	extends Control
+	var trim := Color.WHITE
+	var icon := "up"            ## "up" (height) or "star" (score).
+	var window := Rect2()       ## The number's display window, in local coordinates.
+	var icon_at := Vector2.ZERO
+	var icon_r := 7.0
+
+	func _draw() -> void:
+		var r := Rect2(Vector2.ZERO, size)
+		var sb := StyleBoxFlat.new()
+		sb.anti_aliasing = true
+		sb.bg_color = Color("2a3640")
+		sb.border_color = trim.darkened(0.15)
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(int(minf(14.0, size.y * 0.3)))
+		sb.shadow_color = Color(0, 0, 0, 0.45)
+		sb.shadow_size = 4
+		sb.shadow_offset = Vector2(0, 3)
+		draw_style_box(sb, r)
+		draw_line(Vector2(12, 3.5), Vector2(size.x - 12, 3.5), Color(1, 1, 1, 0.14), 2.0)
+		# The recessed window: dark, with a shadow along its top edge.
+		var w := StyleBoxFlat.new()
+		w.anti_aliasing = true
+		w.bg_color = Color("0a1015")
+		w.border_color = Color(0, 0, 0, 0.7)
+		w.border_width_top = 3
+		w.set_corner_radius_all(int(minf(9.0, window.size.y * 0.3)))
+		draw_style_box(w, window)
+		draw_line(Vector2(window.position.x + 8, window.end.y - 1.5), Vector2(window.end.x - 8, window.end.y - 1.5), PipeArt.fade(trim, 0.35), 2.0)
+		# Icon.
+		var c := icon_at
+		var k := icon_r
+		if icon == "up":
+			draw_colored_polygon(PackedVector2Array([c + Vector2(0, -k), c + Vector2(k, k * 0.2), c + Vector2(k * 0.35, k * 0.2),
+					c + Vector2(k * 0.35, k), c + Vector2(-k * 0.35, k), c + Vector2(-k * 0.35, k * 0.2), c + Vector2(-k, k * 0.2)]), trim)
+		else:
+			var pts := PackedVector2Array()
+			for i in 10:
+				pts.append(c + Vector2.from_angle(-PI / 2.0 + i * PI / 5.0) * (k if i % 2 == 0 else k * 0.45))
+			draw_colored_polygon(pts, trim)
+
+
 ## "▶▶ FAST x4" shown at the top of the board while the water is sped up.
 class SpeedBadge:
 	extends Control
@@ -210,6 +256,7 @@ var root: Control
 var hud: Control
 var stat_values := {}     ## "HEIGHT" / "SCORE" -> value Label.
 var stat_captions := {}   ## "HEIGHT" / "SCORE" -> caption Label.
+var stat_plates := {}     ## "HEIGHT" / "SCORE" -> StatPlate behind them.
 var _stats_key := ""
 var btn_freeze: IconButton
 var btn_reveal: IconButton
@@ -279,7 +326,7 @@ class RivetPanel:
 	extends PanelContainer
 
 	func _draw() -> void:
-		for c in [Vector2(11, 11), Vector2(size.x - 11, 11), Vector2(11, size.y - 11), size - Vector2(11, 11)]:
+		for c in [Vector2(16, 16), Vector2(size.x - 16, 16), Vector2(16, size.y - 16), size - Vector2(16, 16)]:
 			draw_circle(c, 4.5, Color("11181d"))
 			draw_circle(c - Vector2(1, 1), 2.5, Color("8fa3ab"))
 
@@ -289,21 +336,46 @@ func _box(bg: Color, border: Color, radius := 14, bw := 3, shadow := 6) -> Style
 	sb.bg_color = bg
 	sb.border_color = border
 	sb.set_border_width_all(bw)
-	sb.set_corner_radius_all(mini(radius, 3) if Tuning.PS1_MODE else radius)
+	sb.set_corner_radius_all(radius)
 	sb.shadow_color = Color(0, 0, 0, 0.45)
 	sb.shadow_size = shadow
 	sb.shadow_offset = Vector2(0, 3)
-	if Tuning.PS1_MODE and shadow > 0:
-		# Hard, offset drop shadow, like a 32-bit era menu.
-		sb.shadow_color = Color(0, 0, 0, 0.7)
-		sb.shadow_size = 1
-		sb.shadow_offset = Vector2(5, 5)
 	sb.content_margin_left = 16
 	sb.content_margin_right = 16
 	sb.content_margin_top = 8
 	sb.content_margin_bottom = 8
-	sb.anti_aliasing = PipeArt.aa
+	sb.anti_aliasing = true
 	return sb
+
+
+## A chunky game button: rounded, standing on a solid darker base that it
+## sinks onto when pressed.
+func _btn_box(bg: Color, trim: Color, pressed := false) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = trim
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(18)
+	sb.anti_aliasing = true
+	sb.shadow_color = trim.darkened(0.6)
+	sb.shadow_size = 1
+	sb.shadow_offset = Vector2(0, 2 if pressed else 6)
+	if pressed:
+		sb.expand_margin_top = -4.0
+		sb.expand_margin_bottom = 4.0
+	sb.content_margin_left = 18
+	sb.content_margin_right = 18
+	sb.content_margin_top = 12 if pressed else 8
+	sb.content_margin_bottom = 4 if pressed else 8
+	return sb
+
+
+## Normal / hover / pressed game-button styles on `b`.
+func _style_button(b: Button, bg: Color, trim: Color) -> void:
+	b.add_theme_stylebox_override("normal", _btn_box(bg, trim))
+	b.add_theme_stylebox_override("hover", _btn_box(bg.lightened(0.12), trim.lightened(0.3)))
+	b.add_theme_stylebox_override("pressed", _btn_box(bg.darkened(0.25), trim, true))
+	b.add_theme_stylebox_override("hover_pressed", _btn_box(bg.darkened(0.25), trim, true))
 
 
 func _make_theme() -> Theme:
@@ -314,18 +386,19 @@ func _make_theme() -> Theme:
 	th.set_constant("outline_size", "Label", 8)
 	th.set_color("font_color", "Label", Color.WHITE)
 	# Pump-station look: steel plates with water-blue trim.
-	th.set_stylebox("normal", "Button", _box(STEEL, WATER))
-	th.set_stylebox("hover", "Button", _box(STEEL.lightened(0.1), WATER.lightened(0.35)))
-	th.set_stylebox("pressed", "Button", _box(STEEL_DARK, WATER))
+	th.set_stylebox("normal", "Button", _btn_box(STEEL, WATER))
+	th.set_stylebox("hover", "Button", _btn_box(STEEL.lightened(0.1), WATER.lightened(0.35)))
+	th.set_stylebox("pressed", "Button", _btn_box(STEEL_DARK, WATER, true))
+	th.set_stylebox("hover_pressed", "Button", _btn_box(STEEL_DARK, WATER, true))
 	th.set_stylebox("focus", "Button", StyleBoxEmpty.new())
-	th.set_stylebox("disabled", "Button", _box(Color("333333"), Color("555555")))
+	th.set_stylebox("disabled", "Button", _btn_box(Color("333333"), Color("555555")))
 	th.set_color("font_color", "Button", Color.WHITE)
 	th.set_color("font_hover_color", "Button", Color.WHITE)
 	th.set_color("font_pressed_color", "Button", WATER.lightened(0.5))
 	th.set_color("font_outline_color", "Button", Color(0, 0, 0, 0.8))
 	th.set_constant("outline_size", "Button", 6)
 	th.set_font_size("font_size", "Button", 26)
-	var plate := _box(Color(STEEL.r, STEEL.g, STEEL.b, 0.97), STEEL_EDGE, 6, 4, 12)
+	var plate := _box(Color(STEEL.r, STEEL.g, STEEL.b, 0.97), STEEL_EDGE, 18, 4, 12)
 	plate.content_margin_left = 26
 	plate.content_margin_right = 26
 	plate.content_margin_top = 20
@@ -415,12 +488,19 @@ func _build_hud() -> void:
 	hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(hud)
 	for key in ["HEIGHT", "SCORE"]:
-		var cap := _label(key, 14, Color(0.56, 0.72, 0.8), 0)
-		var val := _label("0", 30, Color.WHITE, 6)
+		var trim: Color = WATER if key == "HEIGHT" else HAZARD
+		var plate := StatPlate.new()
+		plate.trim = trim
+		plate.icon = "up" if key == "HEIGHT" else "star"
+		plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud.add_child(plate)
+		var cap := _label(key, 14, trim.lightened(0.2), 3)
+		var val := _label("0", 30, Color("d6f3ff") if key == "HEIGHT" else Color("fff1c4"), 6)
 		hud.add_child(cap)
 		hud.add_child(val)
 		stat_captions[key] = cap
 		stat_values[key] = val
+		stat_plates[key] = plate
 	# Powers: one of each to start, another pair every 100 rows.
 	btn_freeze = _icon_button("freeze", func(): game.use_freeze())
 	btn_reveal = _icon_button("reveal", func(): game.use_reveal())
@@ -508,9 +588,7 @@ func _build_title() -> void:
 		var diff: String = d
 		var b := _button(diff.to_upper(), func(): game.start_run(diff), 200)
 		var trim: Color = trims[diff]
-		b.add_theme_stylebox_override("normal", _box(STEEL, trim, 6, 4))
-		b.add_theme_stylebox_override("hover", _box(STEEL.lightened(0.12), trim.lightened(0.3), 6, 4))
-		b.add_theme_stylebox_override("pressed", _box(STEEL_DARK, trim, 6, 4))
+		_style_button(b, STEEL, trim)
 		_diff_col.add_child(b)
 		difficulty_buttons[diff] = b
 	new_game_button = difficulty_buttons["medium"]
@@ -652,8 +730,9 @@ func refresh() -> void:
 		over_new.modulate = Color.from_hsv(0.13, 0.6 + 0.4 * sin(game.time * 6.0), 1.0)
 
 
-## Height and score inside game.stats_rect, each a small caption over a big
-## number: side by side when the area is wide (portrait bar), else stacked.
+## Height and score inside game.stats_rect: one counter plate each (caption
+## and icon on top, the number in a window below), stacked, or side by side
+## when the area is wide (portrait bar).
 func _place_stats() -> void:
 	var r: Rect2 = game.stats_rect
 	var key := "%s|%s" % [r, game.portrait]
@@ -664,37 +743,52 @@ func _place_stats() -> void:
 	for i in 2:
 		var cap: Label = stat_captions[keys[i]]
 		var val: Label = stat_values[keys[i]]
+		var plate: StatPlate = stat_plates[keys[i]]
 		var cell: Rect2
 		if game.portrait and r.size.x >= 170.0:
 			cell = Rect2(r.position.x + i * r.size.x * 0.5, r.position.y, r.size.x * 0.5, r.size.y)
 		else:
 			cell = Rect2(r.position.x, r.position.y + i * r.size.y * 0.5, r.size.x, r.size.y * 0.5)
-		var val_fs: int
-		var cap_fs: int
-		if game.portrait and r.size.x < 170.0:
-			# Narrow bar column: one row each, caption left and number right.
-			val_fs = int(clampf(minf(cell.size.y * 0.6, cell.size.x * 0.2), 14.0, 28.0))
-			cap_fs = int(clampf(val_fs * 0.5, 11.0, 14.0))
-			var row := Rect2(cell.position.x + 8.0, cell.position.y, maxf(0.0, cell.size.x - 16.0), cell.size.y)
-			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-			val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-			cap.position = row.position
-			cap.size = row.size
-			val.position = row.position
-			val.size = row.size
-		else:
-			val_fs = int(clampf(minf(cell.size.y * 0.5, cell.size.x * 0.24), 16.0, 40.0))
-			cap_fs = int(clampf(val_fs * 0.45, 11.0, 16.0))
-			var top := cell.position.y + cell.size.y * 0.5 - (cap_fs + val_fs) * 0.62
-			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		var pr := cell.grow(-3.0)
+		plate.position = pr.position
+		plate.size = pr.size
+		if pr.size.y < 58.0:
+			# Short plate (phone bar): just the icon (up arrow = height, star =
+			# score) beside a big number window.
+			cap.visible = false
+			plate.icon_r = minf(9.0, pr.size.y * 0.22)
+			plate.icon_at = Vector2(8.0 + plate.icon_r, pr.size.y * 0.5)
+			var wx := plate.icon_at.x + plate.icon_r + 6.0
+			var cw := Rect2(Vector2(wx, 4.0), Vector2(maxf(10.0, pr.size.x - wx - 5.0), pr.size.y - 8.0))
+			plate.window = cw
+			plate.queue_redraw()
+			var cfs := int(clampf(minf(cw.size.y * 0.7, cw.size.x * 0.26), 12.0, 30.0))
 			val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			cap.position = Vector2(cell.position.x, top)
-			cap.size = Vector2(cell.size.x, cap_fs * 1.3)
-			val.position = Vector2(cell.position.x, top + cap_fs * 1.05)
-			val.size = Vector2(cell.size.x, val_fs * 1.3)
+			val.position = pr.position + cw.position
+			val.size = cw.size
+			val.add_theme_font_size_override("font_size", cfs)
+			val.add_theme_constant_override("outline_size", maxi(3, cfs / 6))
+			continue
+		cap.visible = true
+		var cap_fs := int(clampf(pr.size.y * 0.2, 10.0, 15.0))
+		var cap_h := cap_fs * 1.45 + 4.0
+		var win := Rect2(Vector2(7, cap_h), Vector2(pr.size.x - 14.0, pr.size.y - cap_h - 6.0))
+		plate.window = win
+		plate.icon_r = cap_fs * 0.5
+		var cap_w := PipeArt.font().get_string_size(keys[i], HORIZONTAL_ALIGNMENT_LEFT, -1, cap_fs).x
+		var cap_x := (pr.size.x - cap_w) * 0.5 + plate.icon_r + 3.0
+		plate.icon_at = Vector2(cap_x - plate.icon_r * 1.6 - 3.0, 2.0 + cap_h * 0.5)
+		plate.queue_redraw()
+		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		cap.position = pr.position + Vector2(cap_x, 2.0)
+		cap.size = Vector2(pr.size.x - cap_x, cap_h - 2.0)
+		var val_fs := int(clampf(minf(win.size.y * 0.74, win.size.x * 0.24), 12.0, 36.0))
+		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		val.position = pr.position + win.position
+		val.size = win.size
 		cap.add_theme_font_size_override("font_size", cap_fs)
 		val.add_theme_font_size_override("font_size", val_fs)
-		val.add_theme_constant_override("outline_size", maxi(3, val_fs / 5))
+		val.add_theme_constant_override("outline_size", maxi(3, val_fs / 6))
 
 
 func _refresh_powers() -> void:
@@ -752,9 +846,7 @@ func _refresh_powers() -> void:
 func _style_ai(on: bool) -> void:
 	var trim := Color("7dff6a") if on else Color("5fbf55")
 	var bg := Color("1d3a1f") if on else STEEL_DARK
-	btn_ai.add_theme_stylebox_override("normal", _box(bg, trim, 10, 3, 4))
-	btn_ai.add_theme_stylebox_override("hover", _box(bg.lightened(0.1), trim.lightened(0.3), 10, 3, 4))
-	btn_ai.add_theme_stylebox_override("pressed", _box(bg.darkened(0.3), trim, 10, 3, 0))
+	_style_button(btn_ai, bg, trim)
 	btn_ai.add_theme_color_override("font_color", Color("d9ffd2") if on else Color.WHITE)
 
 

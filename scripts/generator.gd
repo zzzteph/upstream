@@ -18,6 +18,12 @@ var spine := {}            ## row -> Vector2i(entry_col, exit_col)
 var spine_needs := {}      ## row -> {col: [entry_side, exit_side]}
 var next_row := 0
 var unlock_mode := false   ## Fill rows with face-down tiles hiding loose pipes.
+## The walkthrough's board (very first game): row 1 goes straight up from the
+## pump, the hatch above the pump hides an empty slot and the hatch to its
+## left hides the straight pipe it needs. See TUTORIAL_SLOT / TUTORIAL_PIPE.
+var tutorial_start := false
+const TUTORIAL_SLOT := Vector2i(Tuning.SOURCE_COL, 1)
+const TUTORIAL_PIPE := Vector2i(Tuning.SOURCE_COL - 1, 1)
 
 
 func reset(seed_value: int) -> void:
@@ -127,6 +133,8 @@ func _make_row(r: int) -> Array:
 	# 1) The guaranteed path through this row.
 	var a := next_entry_col
 	var b := _choose_exit_col(a, r)
+	if tutorial_start and r == 1:
+		b = a
 	spine[r] = Vector2i(a, b)
 	next_entry_col = b
 	var need := {}
@@ -148,6 +156,15 @@ func _make_row(r: int) -> Array:
 	if r < Tuning.SAFE_ROWS:
 		if unlock_mode:
 			_fill_unlock(tiles, need, r)
+			if tutorial_start and r == 1:
+				# Prepared first steps: an empty slot above the pump, and the
+				# straight pipe it needs under the hatch next to it.
+				var slot: Tile = tiles[TUTORIAL_SLOT.x]
+				slot.piece = -1
+				slot.narrow = false
+				var pipe: Tile = tiles[TUTORIAL_PIPE.x]
+				pipe.piece = P.V
+				pipe.narrow = false
 		return tiles
 
 	var zone := Zones.theme_for_row(r)
@@ -203,7 +220,7 @@ func _make_row(r: int) -> Array:
 ## Unlock mode: every tile is face-down. Each row hides at least the pipes its
 ## own guaranteed path needs, so the player can always build the path by
 ## unlocking that row and swapping pipes around. The rest is random pipes,
-## empty slots and the odd alarm trap.
+## empty slots.
 func _fill_unlock(tiles: Array, need: Dictionary, r: int) -> void:
 	var needed := []
 	var spine_free := []
@@ -239,5 +256,3 @@ func _fill_unlock(tiles: Array, need: Dictionary, r: int) -> void:
 			t.piece = _weighted(Tuning.PIECE_WEIGHTS)
 			# Some spare pipes are narrow: they work the same but the goo crawls.
 			t.narrow = t.piece != P.CROSS and r >= Tuning.NARROW_START_ROW and rng.randf() < Tuning.NARROW_CHANCE
-		elif r >= Tuning.ALARM_START_ROW and not t.spine and rng.randf() < Tuning.ALARM_CHANCE:
-			t.alarm = true

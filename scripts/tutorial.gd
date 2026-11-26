@@ -1,31 +1,46 @@
 ## ============================================================================
 ##  TUTORIAL - the short walkthrough on the very first game.
 ## ============================================================================
-## A coach panel at the top of the board says what to do next, and a pulsing
-## frame with a bouncing arrow points at it: open a hatch, pick a pipe up, put
-## it down, hold to speed up, the two powers, and the AI SOLVE button. Each
-## step waits for the player to actually do it (or tap OK); SKIP ends it. The
-## pump's countdown waits while it runs. Once finished (or skipped) it never
-## shows again (SaveData flag "tutorial_done").
+## The first game is played on a prepared board (LevelGenerator.tutorial_start):
+## the hatch above the pump hides an empty slot and the hatch next to it hides
+## the straight pipe that slot needs. So every instruction here is true:
+##
+##   1. open the hatch above the pump     (it's empty)
+##   2. open the hatch next to it         (a straight pipe)
+##   3. pick the pipe up
+##   4. put it in the slot above the pump (now the water has a way up)
+##   5. how the water flows               (OK)
+##   6. hold to speed up                  (hold, or OK)
+##   7. Freeze and Reveal                 (OK)
+##   8. AI SOLVE                          (OK)
+##
+## Steps 1-4 follow the board itself, so they stay right whatever the player
+## taps in between (a wrong pipe picked up is put back first). A coach panel at
+## the top of the board says what to do; everything else is dimmed (a
+## spotlight on the target) and a pulsing frame and a bouncing arrow point at
+## it. The pump's countdown waits while it runs. Once finished it never shows
+## again (SaveData flag "tutorial_done").
 class_name Tutorial
 extends Control
 
-enum Step { OPEN, PICK, DROP, SPEED, POWERS, AI }
+enum Step { FIRST_PIPE, FLOW, SPEED, POWERS, AI }
 
 const HAZARD := Color("ffc928")
+const SHADE := Color(0.0, 0.01, 0.02, 0.66)   ## The dimmed background around the spotlight.
+const SLOT := LevelGenerator.TUTORIAL_SLOT
+const PIPE := LevelGenerator.TUTORIAL_PIPE
 
 var game  ## The Game node (main.gd).
 var active := false
-var step := Step.OPEN
+var step := Step.FIRST_PIPE
+var sub := ""                    ## Within FIRST_PIPE: "open", "next", "pick", "putback", "drop".
 
 var _panel: PanelContainer
 var _text: Label
 var _ok: Button
-var _skip: Button
-var _flips0 := 0
-var _drops0 := 0
 var _held_for := 0.0
 var _t := 0.0
+var _target := Rect2()
 
 
 func _ready() -> void:
@@ -33,7 +48,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	visible = false
 	_panel = PanelContainer.new()
-	var sb: StyleBoxFlat = game.ui._box(Color(0.09, 0.12, 0.15, 0.96), HAZARD, 12, 3, 6)
+	var sb: StyleBoxFlat = game.ui._box(Color(0.09, 0.12, 0.15, 0.96), HAZARD, 18, 3, 8)
 	sb.set_content_margin_all(14)
 	_panel.add_theme_stylebox_override("panel", sb)
 	add_child(_panel)
@@ -51,18 +66,16 @@ func _ready() -> void:
 	hb.alignment = BoxContainer.ALIGNMENT_CENTER
 	hb.add_theme_constant_override("separation", 12)
 	vb.add_child(hb)
-	_skip = game.ui._button("SKIP", func(): finish(), 110)
 	_ok = game.ui._button("OK", func(): _next(), 110)
-	for b in [_skip, _ok]:
-		b.custom_minimum_size = Vector2(110, 44)
-		b.add_theme_font_size_override("font_size", 20)
-		hb.add_child(b)
+	_ok.custom_minimum_size = Vector2(110, 44)
+	_ok.add_theme_font_size_override("font_size", 20)
+	hb.add_child(_ok)
 
 
 func start() -> void:
 	active = true
 	visible = true
-	_go(Step.OPEN)
+	_go(Step.FIRST_PIPE)
 
 
 ## Leave without marking it done (e.g. back to the menu mid-way).
@@ -71,7 +84,7 @@ func stop() -> void:
 	visible = false
 
 
-## Done or skipped: never show it again.
+## Done (or the AI took over): never show it again.
 func finish() -> void:
 	active = false
 	visible = false
@@ -81,6 +94,8 @@ func finish() -> void:
 
 func _next() -> void:
 	match step:
+		Step.FLOW:
+			_go(Step.SPEED)
 		Step.SPEED:
 			_go(Step.POWERS)
 		Step.POWERS:
@@ -92,35 +107,59 @@ func _next() -> void:
 
 func _go(s: int) -> void:
 	step = s
-	_flips0 = game.flips
-	_drops0 = game.drops
 	_held_for = 0.0
-	_ok.visible = s == Step.SPEED or s == Step.POWERS or s == Step.AI
+	_ok.visible = s != Step.FIRST_PIPE
 	_ok.text = "LET'S GO" if s == Step.AI else "OK"
-	_skip.visible = s != Step.AI
-	_update_text()
 
 
-func _update_text() -> void:
+## The slot above the pump takes the water straight up?
+func _slot_done() -> bool:
+	var t: Tile = game.grid.get_tile(SLOT.x, SLOT.y)
+	return t != null and not t.hidden and t.piece >= 0 and Pieces.exit_dir(t.piece, Pieces.S) == Pieces.N
+
+
+func _fits_up(item: int) -> bool:
+	var p := Pieces.item_piece(item)
+	return p == Pieces.V or p == Pieces.CROSS
+
+
+## Work out where the player is in steps 1-4 from the board itself, and what
+## to point at.
+func _first_pipe() -> void:
+	var slot: Tile = game.grid.get_tile(SLOT.x, SLOT.y)
 	var tap := "Tap" if game.is_touch else "Click"
-	var hold := "Hold your finger on the screen" if game.is_touch else "Hold the mouse button (or F)"
+	var cell := Vector2i(-1, -1)
 	var txt := ""
-	match step:
-		Step.OPEN:
-			txt = "%s a steel hatch to open it." % tap
-		Step.PICK:
-			if _nearest(func(t: Tile): return t.is_loose()).x < 0:
-				txt = "No pipe yet. Open more hatches to find one."
-			else:
-				txt = "%s a pipe to pick it up." % tap
-		Step.DROP:
-			txt = "Now %s an empty slot to put it there. Lay pipe up from the pump!" % tap.to_lower()
-		Step.SPEED:
-			txt = "%s to speed the water up. Let go to slow down." % hold
-		Step.POWERS:
-			txt = "FREEZE stops the water for a few seconds. REVEAL opens every hatch on screen."
-		Step.AI:
-			txt = "Stuck? AI SOLVE plays for you. %s it again to take over." % tap
+	if slot == null:
+		return
+	if slot.hidden:
+		sub = "open"
+		cell = SLOT
+		txt = "The water will come up out of the pump. %s the steel hatch just above it." % tap
+	elif game.held_piece >= 0 and not _fits_up(game.held_piece):
+		sub = "putback"
+		cell = game.held_from
+		txt = "That pipe won't take the water up. %s it again to put it back." % tap
+	elif game.held_piece >= 0:
+		sub = "drop"
+		cell = SLOT
+		txt = "Now %s the spot above the pump to put the pipe there." % tap.to_lower()
+	else:
+		var pipe := _nearest(func(t: Tile): return t.is_loose() and _fits_up(t.get_item()) and t != slot)
+		if pipe.x >= 0:
+			sub = "pick"
+			cell = pipe
+			txt = "A straight pipe: just what that spot needs. %s it to pick it up." % tap
+		else:
+			sub = "next"
+			var nxt: Tile = game.grid.get_tile(PIPE.x, PIPE.y)
+			cell = PIPE if nxt != null and nxt.hidden else _nearest(func(t: Tile): return t.hidden)
+			txt = "It's empty, and the water needs a pipe there. Open the hatch next to it."
+	_set_text(txt)
+	_target = game.renderer.tile_rect(cell.x, cell.y) if cell.x >= 0 else Rect2()
+
+
+func _set_text(txt: String) -> void:
 	if _text.text != txt:
 		_text.text = txt
 
@@ -133,25 +172,30 @@ func _process(dt: float) -> void:
 		return
 	_t += dt
 	visible = not game.paused
+	var b: Rect2 = game.board_rect
 	match step:
-		Step.OPEN:
-			if game.flips > _flips0:
-				_go(Step.PICK)
-		Step.PICK:
-			if game.held_piece >= 0:
-				_go(Step.DROP)
+		Step.FIRST_PIPE:
+			if _slot_done():
+				_go(Step.FLOW)
 			else:
-				_update_text()
-		Step.DROP:
-			if game.drops > _drops0:
-				_go(Step.SPEED)
-			elif game.held_piece < 0:
-				_go(Step.PICK)
+				_first_pipe()
+		Step.FLOW:
+			_set_text("That's it! The water flows up through connected pipes. Keep building a way up: if the water reaches a closed hatch, a rock or an open pipe end, the run is over.")
+			_target = game.renderer.tile_rect(SLOT.x, SLOT.y).merge(game.renderer.tile_rect(SLOT.x, 0))
 		Step.SPEED:
+			var hold := "Hold your finger on the screen" if game.is_touch else "Hold the mouse button down (or the F key)"
+			_set_text("%s to speed the water up x%d. Let go to slow it down again." % [hold, int(Tuning.HOLD_SPEED_MULT)])
+			_target = b  # Hold anywhere on the board.
 			if game.speed_held():
 				_held_for += dt
 				if _held_for > 0.6:
 					_go(Step.POWERS)
+		Step.POWERS:
+			_set_text("FREEZE stops the water for %d seconds. REVEAL opens every hatch on screen. You start with one of each and get another every %d rows." % [int(Tuning.FREEZE_TIME), Tuning.POWER_AWARD_ROWS])
+			_target = game.freeze_rect.merge(game.reveal_rect)
+		Step.AI:
+			_set_text("Stuck? AI SOLVE plays for you. %s it again to take over." % ("Tap" if game.is_touch else "Click"))
+			_target = game.ai_rect
 	_place_panel()
 	queue_redraw()
 
@@ -186,44 +230,29 @@ func _nearest(pred: Callable) -> Vector2i:
 
 ## What the arrow points at, as a screen rect (empty = nothing).
 func target_rect() -> Rect2:
-	var cell := Vector2i(-1, -1)
-	match step:
-		Step.OPEN:
-			cell = _nearest(func(t: Tile): return t.hidden)
-		Step.PICK:
-			cell = _nearest(func(t: Tile): return t.is_loose())
-			if cell.x < 0:
-				cell = _nearest(func(t: Tile): return t.hidden)
-		Step.DROP:
-			var above: Tile = game.grid.get_tile(Tuning.SOURCE_COL, 1)
-			if above != null and above.is_slot():
-				cell = Vector2i(Tuning.SOURCE_COL, 1)
-			else:
-				cell = _nearest(func(t: Tile): return t.is_slot())
-		Step.SPEED:
-			var b: Rect2 = game.board_rect
-			return Rect2(b.get_center() - Vector2(40, 40), Vector2(80, 80))
-		Step.POWERS:
-			return game.freeze_rect.merge(game.reveal_rect)
-		Step.AI:
-			return game.ai_rect
-	if cell.x < 0:
-		return Rect2()
-	return game.renderer.tile_rect(cell.x, cell.y)
+	return _target
 
 
 func _draw() -> void:
 	if not active:
 		return
-	var r := target_rect()
+	var r := _target
+	var vs: Vector2 = game.view_size
 	if r.size.x <= 0.0:
+		draw_rect(Rect2(Vector2.ZERO, vs), SHADE)
 		return
+	# Spotlight: dim everything but the target (the coach panel draws on top).
+	var hole := r.grow(6.0).intersection(Rect2(Vector2.ZERO, vs))
+	draw_rect(Rect2(0, 0, vs.x, hole.position.y), SHADE)
+	draw_rect(Rect2(0, hole.end.y, vs.x, vs.y - hole.end.y), SHADE)
+	draw_rect(Rect2(0, hole.position.y, hole.position.x, hole.size.y), SHADE)
+	draw_rect(Rect2(hole.end.x, hole.position.y, vs.x - hole.end.x, hole.size.y), SHADE)
 	var pulse := 0.5 + 0.5 * sin(_t * 6.0)
 	var g := r.grow(4.0 + 4.0 * pulse)
 	draw_rect(g, Color(0, 0, 0, 0.6), false, 7.0)
 	draw_rect(g, PipeArt.fade(HAZARD, 0.65 + 0.35 * pulse), false, 4.0)
 	if step == Step.SPEED:
-		# A finger pressing, with rings spreading out.
+		# A finger pressing in the middle of the board, with rings spreading out.
 		var c := r.get_center()
 		for i in 2:
 			var k := fposmod(_t * 0.9 + i * 0.5, 1.0)

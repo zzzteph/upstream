@@ -55,7 +55,6 @@ var _beeped := 0
 # Unlock mode
 var held_from := Vector2i(-1, -1)  ## Tile whose pipe is picked up.
 var held_piece := -1               ## Pipe item in hand (see Pieces.item), -1 = empty hand.
-var surge_timer := 0.0             ## Alarm surge time left.
 # Milestone powers (earned every POWER_AWARD_ROWS rows)
 var freezes := 0                   ## Flow-freeze charges.
 var reveals := 0                   ## Reveal charges.
@@ -74,7 +73,6 @@ var ai: AIPlayer
 var tutorial: Tutorial
 var tutorial_pending := false      ## Show the walkthrough at the next run (first game ever).
 var ai_used := false               ## The AI played part of this run: no best score.
-var alarms := 0
 
 # Layout, in virtual pixels (720 on the short side).
 var view_size := Vector2(720, 720)
@@ -176,8 +174,8 @@ func new_board(seed_value: int) -> void:
 	grid.clear()
 	gen.reset(seed_value)
 	gen.unlock_mode = mode == "unlock"
+	gen.tutorial_start = tutorial_pending and mode == "unlock"
 	_clear_hand()
-	surge_timer = 0.0
 	freezes = Tuning.START_POWERS
 	reveals = Tuning.START_POWERS
 	freeze_timer = 0.0
@@ -185,7 +183,6 @@ func new_board(seed_value: int) -> void:
 	_next_award_row = Tuning.POWER_AWARD_ROWS
 	flips = 0
 	drops = 0
-	alarms = 0
 	hold_down = false
 	hold_key = false
 	ai_hold = false
@@ -320,7 +317,6 @@ func _update_play(dt: float) -> void:
 		if countdown <= 0.0:
 			_start_flow()
 		return
-	surge_timer = maxf(0.0, surge_timer - dt)
 	if freeze_timer > 0.0:
 		freeze_timer -= dt
 		if randf() < 0.6:
@@ -368,8 +364,6 @@ func effective_speed() -> float:
 		s *= Tuning.HOLD_SPEED_MULT
 	if fast_forward:
 		s *= Tuning.FAST_FORWARD_MULT
-	if surge_timer > 0.0:
-		s *= Tuning.ALARM_SURGE_MULT
 	if freeze_timer > 0.0:
 		return 0.0
 	return s
@@ -443,7 +437,6 @@ func use_freeze() -> bool:
 
 
 ## Reveal: unlock every tile on the current map, in a wave from the bottom.
-## Alarms are disarmed rather than set off.
 func use_reveal() -> bool:
 	if reveals <= 0 or (state != State.COUNTDOWN and state != State.RUNNING) or paused:
 		sfx.play("deny")
@@ -461,7 +454,6 @@ func use_reveal() -> bool:
 			if t == null or not t.hidden:
 				continue
 			t.hidden = false
-			t.alarm = false
 			t.flip_at = time + maxf(0.0, r - base) * 0.045 + c * 0.012
 			any = true
 			count += 1
@@ -491,7 +483,6 @@ func _game_over(e: Dictionary) -> void:
 	buzz(250)
 	renderer.burst(p, col, 44, 5.0, 0.09, 1.2, 8.0)
 	fast_forward = false
-	surge_timer = 0.0
 	freeze_timer = 0.0
 	_clear_hand()
 	if score > best and not ai_used:
@@ -594,9 +585,6 @@ func _unlock_click(c: int, r: int) -> String:
 			renderer.animate_row(r, time + Tuning.FLIP_TIME + 0.05)
 			sfx.play("flip", 0.9 + randf() * 0.2)
 			renderer.burst(wp, Color(0.8, 0.85, 0.9), 8, 2.0, 0.05, 0.4, 2.0, false)
-			if t.alarm:
-				t.alarm = false
-				_trigger_alarm(wp)
 		"pick":
 			held_from = Vector2i(c, r)
 			held_piece = t.get_item()
@@ -624,18 +612,6 @@ func _unlock_click(c: int, r: int) -> String:
 		_:
 			sfx.play("deny")
 	return action
-
-
-func _trigger_alarm(wp: Vector2) -> void:
-	alarms += 1
-	surge_timer = Tuning.ALARM_SURGE_TIME
-	cam.add_shake(0.45)
-	sfx.play("alarm")
-	renderer.burst(wp, Color("ff3a2a"), 30, 4.0, 0.08, 0.9)
-	renderer.float_text(wp, "ALARM!", Color("ff5a4a"), 0.36, 1.3)
-	ui.show_toast("ALARM!  The water surges", Color("ff5a4a"))
-	buzz(120)
-	ui.flash(Color(1.0, 0.1, 0.05, 0.35))
 
 
 func _clear_hand() -> void:
@@ -838,7 +814,7 @@ func _compute_layout() -> void:
 	if portrait:
 		# Board on top, a control bar along the bottom:
 		# [hand / queue] [height + score] [freeze] [reveal]
-		var bottom_h := clampf(view_size.y * 0.17, 140.0, 200.0)
+		var bottom_h := clampf(view_size.y * 0.2, 164.0, 214.0)
 		var avail_w := view_size.x - 40.0
 		var avail_h := view_size.y - bottom_h
 		T = _tile_size(minf(avail_w / Tuning.COLS, avail_h / min_rows))
@@ -862,8 +838,8 @@ func _compute_layout() -> void:
 				_slots.append(Rect2(x + (i % 2) * (s1 + 6.0), y + (i / 2) * (s1 + 6.0), s1, s1))
 			x += s0 + 12.0
 		var mid_w := maxf(0.0, freeze_rect.position.x - 10.0 - x)
-		var ai_h := 34.0
-		stats_rect = Rect2(x, queue_rect.position.y + 8.0, mid_w, queue_rect.size.y - 22.0 - ai_h)
+		var ai_h := 32.0
+		stats_rect = Rect2(x, queue_rect.position.y + 8.0, mid_w, queue_rect.size.y - 20.0 - ai_h)
 		ai_rect = Rect2(x, stats_rect.end.y + 6.0, mid_w, ai_h)
 	else:
 		# Board on the left, a panel on the right:

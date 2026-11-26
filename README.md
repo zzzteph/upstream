@@ -20,19 +20,19 @@ The pump's pressure gauge counts down to the first surge. After that, the water 
 
 - **Endless vertical climb.** The shaft is generated as you rise, and every row is guaranteed to have a way through. If you spill, it's on you.
 - **Three difficulties.** **Easy** runs the water at half speed, **Medium** is the standard pace and **Hard** is 25% faster. Each keeps its own best score.
-- **Crack it open, then plan.** Tap a hatch to flip it. Behind it you might find a pipe, an empty slot, a rock or an alarm trap. Tap a pipe, then tap where it should go. Closed hatches are light, raised steel, and empty slots are dark sockets, so you can always tell them apart.
+- **Crack it open, then plan.** Tap a hatch to flip it. Behind it you might find a pipe, an empty slot or a rock. Tap a pipe, then tap where it should go. Closed hatches are light, raised steel, and empty slots are dark sockets, so you can always tell them apart.
 - **Buy yourself time.** Narrow pipes and reservoirs slow the water down, so drag them onto its path when things get tight.
 - **Hold to hurry.** Route ready? Hold your finger on the screen and the water rushes ahead at four times the speed. Let go to slow it back down.
 - **Emergency powers.** Every run starts with one **Flow-freeze**, which locks every pipe in ice and stops the water cold, and one **Reveal**, which flips every hatch on screen open in one wave. You earn another of each every 100 rows.
-- **A shaft that fights back.** As you climb, you'll meet more rocks, one-way valves and alarms that make the water surge.
+- **A shaft that fights back.** As you climb, you'll meet more rocks and one-way valves that only let water through from one side.
 - **Five zones.** Climb from the Sewer through the Factory, Neon, Magma and out into Space.
 - **Straightforward scoring.** +1 for every tube the water fills and +3 for every row it climbs. There are no multipliers and no bonus pickups, so your score only ever reflects how well you played. Your best score on each difficulty is saved and shown on the main menu.
-- **Learn in a minute.** Your first game starts with a short walkthrough that points at exactly what to tap.
+- **Learn in a minute.** Your first game starts on a specially prepared board with a short walkthrough: open the hatch above the pump, find the pipe it needs, put it in place, and you're off.
 - **AI SOLVE.** Stuck, or just curious? Tap AI SOLVE and watch a bot solve your board the way a person would, one tap at a time. It opens hatches, plans the best route from the pipes it has found, rebuilds when a route goes wrong, slips narrow pipes in front of the water to buy time, and saves Freeze and Reveal for when they matter. It only uses what it can see. Tap it again to take over. Runs the AI helps with don't count toward your best score.
 - **Made for phones.** One-thumb touch controls and a portrait layout with every control in one bar along the bottom, plus haptics where your phone supports them.
 - **A pump-station look.** Steel plates, rivets, hazard stripes and glowing water, with a subtle PS1-era finish.
 
-<p align="center"><img src="media/phone.png" width="320" alt="AI SOLVE playing on a phone"></p>
+<p align="center"><img src="media/phone.png" width="320" alt="Upstream on a phone"></p>
 
 ## How to play
 

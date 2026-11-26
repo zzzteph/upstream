@@ -307,19 +307,7 @@ func _run() -> void:
 	click(tile_center(5, 1))
 	await frames(1)
 	check(ndst.piece == P.V and ndst.narrow and not nsrc.narrow and nsrc.piece == -1, "a narrow pipe stays narrow when moved")
-	# An alarm trap.
-	var trap: Tile = null
-	for c in Tuning.COLS:
-		var t: Tile = game.grid.get_tile(c, 5)
-		if t.hidden and t.kind == Tile.EMPTY:
-			trap = t
-			t.alarm = true
-			t.piece = -1
-			click(tile_center(c, 5))
-			break
-	await frames(1)
-	check(trap != null and game.alarms == 1 and game.surge_timer > 0.0, "unlocking an alarm trap starts a surge")
-	check(game.effective_speed() > game.height_speed(), "the surge speeds the goo up")
+	check(not "alarm" in Tile.new() and not "surge_timer" in game, "no alarm traps (and no surges)")
 	# Goo meets a locked tile.
 	game.start_run()
 	await frames(1)
@@ -343,7 +331,7 @@ func _run() -> void:
 			break
 	game.debug_autoplay = false
 	check(game.height >= 120, "unlock mode: autoplay climbs to row 120 (reached %d, %s)" % [game.height, game.last_reason])
-	print("unlock run: height %d, score %d, flips %d, alarms %d" % [game.height, game.score, game.flips, game.alarms])
+	print("unlock run: height %d, score %d, flips %d" % [game.height, game.score, game.flips])
 
 	# --- difficulty: EASY / MEDIUM / HARD scale the water's speed ---
 	var speeds := {"easy": 0.5, "medium": 1.0, "hard": 1.25}
@@ -464,47 +452,74 @@ func _run() -> void:
 	press_at(spot, false)
 	check(cd0 - game.countdown > 2.0, "holding during the countdown runs it faster (%.1fs in 1s)" % (cd0 - game.countdown))
 
-	# --- first-run walkthrough ---
+	# --- first-run walkthrough, on a prepared board ---
 	var tut = game.tutorial
 	game.tutorial_pending = true
 	game.start_run("medium")
 	await frames(2)
 	check(tut.active and tut.visible, "the walkthrough starts on the first game")
+	check(not tut._ok.visible, "no buttons on the doing-steps: you do the thing")
+	var slot_t: Tile = game.grid.get_tile(3, 1)
+	var pipe_t: Tile = game.grid.get_tile(2, 1)
+	check(slot_t.hidden and slot_t.piece < 0 and pipe_t.hidden and pipe_t.piece == P.V and not pipe_t.narrow
+			and game.gen.spine_needs[1].has(3) and game.gen.spine_needs[1][3] == [P.S, P.N],
+			"the first board is prepared: an empty slot above the pump, a straight pipe next to it, the way up goes straight")
 	var cd1: float = game.countdown
 	await frames(60)
 	check(game.countdown == cd1, "the pump waits while the walkthrough is on")
+	check(tut.sub == "open" and tut.target_rect() == game.renderer.tile_rect(3, 1), "walkthrough 1: it points at the hatch above the pump")
 	click(tut.target_rect().get_center())
 	await frames(1)
-	check(tut.step == tut.Step.PICK, "walkthrough 1: tapping the highlighted hatch opens it")
-	guard = 0
-	while tut.step == tut.Step.PICK and guard < 14:
-		click(tut.target_rect().get_center())  # Opens more hatches until a pipe shows up, then picks it.
-		await frames(1)
-		guard += 1
-	check(tut.step == tut.Step.DROP and game.held_piece >= 0, "walkthrough 2: tapping a pipe picks it up")
+	check(not slot_t.hidden and tut.sub == "next" and tut.target_rect() == game.renderer.tile_rect(2, 1), "walkthrough 2: that hatch was empty, and it points at the one next to it")
 	click(tut.target_rect().get_center())
 	await frames(1)
-	check(tut.step == tut.Step.SPEED and game.drops >= 1, "walkthrough 3: tapping the highlighted slot puts it down")
+	check(not pipe_t.hidden and tut.sub == "pick" and tut.target_rect() == game.renderer.tile_rect(2, 1), "walkthrough 3: it was a straight pipe, and it says to pick it up")
+	# Picking up a pipe that won't fit: it says to put it back first.
+	var wrong: Tile = game.grid.get_tile(4, 1)
+	wrong.hidden = false
+	wrong.kind = Tile.EMPTY
+	wrong.set_item(P.H)
+	game.grid.touch(1)
+	click(tile_center(4, 1))
+	await frames(1)
+	check(tut.sub == "putback" and tut.target_rect() == game.renderer.tile_rect(4, 1), "holding a pipe that won't fit: it says to put it back")
+	click(tut.target_rect().get_center())
+	await frames(1)
+	check(game.held_piece < 0 and tut.sub == "pick", "after putting it back it points at the straight pipe again")
+	click(tut.target_rect().get_center())
+	await frames(1)
+	check(game.held_piece >= 0 and tut.sub == "drop" and tut.target_rect() == game.renderer.tile_rect(3, 1), "walkthrough 4: holding it, it points at the spot above the pump")
+	click(tut.target_rect().get_center())
+	await frames(1)
+	check(slot_t.piece == P.V and tut.step == tut.Step.FLOW, "walkthrough 5: the pipe is above the pump")
+	click(tut._ok.get_global_rect().get_center())
+	await frames(1)
+	check(tut.step == tut.Step.SPEED, "walkthrough 6: how to speed up")
 	press_at(spot)
 	await frames(60)
 	press_at(spot, false)
 	await frames(1)
-	check(tut.step == tut.Step.POWERS, "walkthrough 4: holding the screen")
+	check(tut.step == tut.Step.POWERS, "walkthrough 7: holding the screen moves on")
+	check(tut._text.text.contains("%d seconds" % int(Tuning.FREEZE_TIME)) and tut._text.text.contains("%d rows" % Tuning.POWER_AWARD_ROWS), "the powers text gives the real numbers")
 	click(tut._ok.get_global_rect().get_center())
 	await frames(1)
-	check(tut.step == tut.Step.AI, "walkthrough 5: the powers")
+	check(tut.step == tut.Step.AI, "walkthrough 8: AI SOLVE")
 	click(tut._ok.get_global_rect().get_center())
 	await frames(1)
-	check(not tut.active and not game.tutorial_pending and SaveData.load_flag("tutorial_done"), "walkthrough 6: done, and saved so it won't show again")
+	check(not tut.active and not game.tutorial_pending and SaveData.load_flag("tutorial_done"), "walkthrough done, and saved so it won't show again")
 	var cd2: float = game.countdown
 	await frames(30)
 	check(game.countdown < cd2, "the countdown runs again after the walkthrough")
-	game.tutorial_pending = true
+	game._start_flow()
+	guard = 0
+	while game.state == S.RUNNING and game.flow.row < 2 and guard < 600:
+		await frames(1)
+		guard += 1
+	check(slot_t.fill[0] >= 1.0, "the water really flows up through the pipe placed in the walkthrough")
 	game.start_run("medium")
-	await frames(2)
-	click(tut._skip.get_global_rect().get_center())
 	await frames(1)
-	check(not tut.active and not game.tutorial_pending, "SKIP ends the walkthrough")
+	check(not tut.active and not game.gen.tutorial_start, "the next game is a normal, unprepared one")
+	check(not "_skip" in tut, "the walkthrough has no SKIP button")
 
 	# --- AI SOLVE: a bot that plans routes and plays through taps, at a human pace ---
 	seed(4242)

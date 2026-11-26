@@ -163,7 +163,7 @@ func _start_move() -> void:
 	_from = pointer
 	_move_t = -randf_range(0.03, 0.1)
 	var target := _target_pos(_queue[0])
-	_move_len = _from.distance_to(target) / (Tuning.AI_MOVE_SPEED * (1.7 if _hurry else 1.0)) + (0.06 if _hurry else 0.1)
+	_move_len = _from.distance_to(target) / (Tuning.AI_MOVE_SPEED * (1.7 if _hurry else 1.0)) + (0.05 if _hurry else 0.08)
 	_arc = -1.0 if randf() < 0.5 else 1.0
 
 
@@ -229,8 +229,6 @@ const INF_COST := 1.0e9
 ## Water speed in tiles per second-unit, without the AI's own hold.
 func _speed() -> float:
 	var s: float = game.height_speed() * float(Tuning.DIFFICULTY_SPEED.get(game.difficulty, 1.0))
-	if game.surge_timer > 0.0:
-		s *= Tuning.ALARM_SURGE_MULT
 	return maxf(0.01, s)
 
 
@@ -303,7 +301,7 @@ func _step(c: int, r: int, en: int, ex: int, lo: int, hi: int, have: Dictionary,
 	if t.piece >= 0 and P.exit_dir(t.piece, en) == ex and (t.special != Tile.SP_ONEWAY or t.oneway_entry == en) \
 			and t.fill_entry[P.channel_for(t.piece, en)] < 0:
 		var slow := t.special == Tile.SP_RESERVOIR or t.narrow
-		return [(0.4 if slow else 1.0) + down, -1]
+		return [(0.1 if slow else 0.3) + down, -1]
 	if t.fixed or t.has_goo() or not game.is_tile_visible(c, r):
 		return [INF_COST, -1]
 	var need := P.piece_for(en, ex)
@@ -542,7 +540,7 @@ func _decide() -> Array:
 	# 4) Look before you leap: open the hatch where the route stops before
 	#    building towards it (it may hide a rock), unless a fix can't wait.
 	var slack0: float = 99.0 if needs.is_empty() else float(needs[0]["arrive"]) - SWAP_TIME_HURRY
-	if kind == "hidden" and g.is_tile_visible(end.x, end.y) and (slack0 > TAP_TIME + 1.0 or (arrive_end < 6.0 and slack0 > TAP_TIME * 0.6)):
+	if kind == "hidden" and g.is_tile_visible(end.x, end.y) and (slack0 > TAP_TIME + 1.0 or (arrive_end < 6.0 and slack0 > TAP_TIME + 0.3)):
 		return [_tile(end, "flip")]
 	# 5) The most urgent fix first.
 	if not needs.is_empty() and (needs[0]["arrive"] < 6.0 or kind == "open"):
@@ -570,10 +568,17 @@ func _decide() -> Array:
 		var sw := _swap(n, plan)
 		if not sw.is_empty():
 			return sw
-	# 9) All built to the top of the screen: hold to hurry the water along.
-	if kind == "open" and needs.is_empty() and arrive_end > 4.0:
+	# 9) Spare time with the route built: swap narrow pipes into it (each one
+	#    makes the water take 2.5x as long there - time to build further).
+	if needs.is_empty():
+		var up := _upgrade(plan)
+		if not up.is_empty():
+			return up
+	# 10) All built to the top of the screen: hold to hurry the water along
+	#     (only while it's slow - at speed the time is worth more than points).
+	if kind == "open" and needs.is_empty() and arrive_end > 4.0 and _speed() < 2.2:
 		return [{"kind": "hold"}]
-	# 10) Spare time: open hatches ahead so the next plan has more to work with.
+	# 11) Spare time: open hatches ahead so the next plan has more to work with.
 	var ahead := _hidden(end, int(w["row"]))
 	if not ahead.is_empty() and arrive_end > 3.0:
 		return [_tile(ahead[0], "flip")]
@@ -610,19 +615,53 @@ func _swap(n: Dictionary, plan: Dictionary) -> Array:
 		return []
 	var urgent: bool = n["arrive"] < 8.0 or _speed() > 1.6
 	var water_row: int = game.flow.row if game.flow.active else 0
-	cands.sort_custom(func(a, b): return _source_key(a, cell_v, urgent, water_row) < _source_key(b, cell_v, urgent, water_row))
+	# Two for one: a source that is itself a route cell wanting the pipe that
+	# the target holds now gets fixed by the same swap.
+	var tt: Tile = game.grid.get_tile(cell_v.x, cell_v.y)
+	var give: int = tt.get_item() if tt != null else -1
+	var wants := {}
+	for c in plan.get("cells", []):
+		if c["need"] >= 0 and c["v"] != cell_v:
+			wants[c["v"]] = c["need"]
+	cands.sort_custom(func(a, b): return _source_key(a, cell_v, urgent, water_row, give, wants) < _source_key(b, cell_v, urgent, water_row, give, wants))
 	return [_tile(cands[0], "pick"), _tile(cell_v, "drop")]
 
 
-func _source_key(v: Vector2i, target: Vector2i, urgent: bool, water_row: int) -> float:
+## Replace a normal pipe on the route with a narrow one of the same shape,
+## when that gains more time than the swap costs.
+func _upgrade(plan: Dictionary) -> Array:
+	var sp := _speed()
+	var gain := Tuning.BASE_SEGMENT_TIME * (Tuning.NARROW_FILL_FACTOR - 1.0) / sp
+	if gain < SWAP_TIME * 1.3:
+		return []
+	var keep := {}
+	for cell in plan.get("cells", []):
+		if cell["need"] < 0:
+			keep[cell["v"]] = true
+	var pool := _pool()
+	for cell in plan.get("cells", []):
+		if cell["need"] >= 0 or cell["arrive"] < 3.0:
+			continue
+		var v: Vector2i = cell["v"]
+		var t: Tile = game.grid.get_tile(v.x, v.y)
+		if t == null or not t.is_loose() or t.narrow or t.piece == P.CROSS or not game.is_tile_visible(v.x, v.y):
+			continue
+		for src in pool.get(t.piece, []):
+			var s: Tile = game.grid.get_tile(src.x, src.y)
+			if src != v and not keep.has(src) and s.narrow:
+				return [_tile(src, "pick"), _tile(v, "drop")]
+	return []
+
+
+func _source_key(v: Vector2i, target: Vector2i, urgent: bool, water_row: int, give: int, wants: Dictionary) -> float:
 	var t: Tile = game.grid.get_tile(v.x, v.y)
 	var k := float(absi(v.x - target.x) + absi(v.y - target.y))
 	if v.y < water_row:
 		k -= 3.0  # Rows the water has left behind are free to plunder.
-	if urgent and t != null and t.narrow:
-		k -= 6.0  # A narrow pipe right in front of the water buys time.
-	elif not urgent and t != null and t.narrow:
-		k += 2.0
+	if t != null and t.narrow:
+		k -= 6.0 if urgent else 3.0  # A narrow pipe on the route buys time.
+	if give >= 0 and wants.has(v) and _fits(give, wants[v]):
+		k -= 10.0  # Two cells fixed with one swap.
 	return k
 
 

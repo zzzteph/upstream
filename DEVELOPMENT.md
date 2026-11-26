@@ -11,7 +11,10 @@ hi-res mode) with 15-bit colour and a subtle ordered dither, then scales up
 smoothly.
 The menu and the side panel use an industrial pump-station look (steel plates,
 rivets, hazard stripes, a pressure gauge on the nameplate) and stay sharp so
-they read well on phones. There is no top bar: height and score sit in the side
+they read well on phones. Buttons are chunky, rounded game buttons that stand
+on a darker base and sink onto it when pressed (`_btn_box` in `ui.gd`); height
+and score are counter plates with an icon (up arrow, star) and the number in a
+dark display window. There is no top bar: height and score sit in the side
 panel under the hand (in the bottom bar, between the hand and the power
 buttons, in portrait), so the board gets the full height of the screen.
 
@@ -68,16 +71,15 @@ The game plays in unlock mode; set `DEFAULT_MODE` in `scripts/tuning.gd` to
 - **Unlock** (like BioShock's hacking): every tile starts as a closed steel
   hatch (light, raised, tread plate). Click or tap one to flip it open and see
   what's under it: a pipe, an empty slot (a dark recessed socket with corner
-  marks), a rock, or an alarm trap. Click a pipe to pick it up,
-  then click an open spot or another pipe to swap them (click it again to put
-  it back). Water that reaches a closed block spills, so open blocks ahead of it. An
-  alarm makes the water surge for a few seconds.
+  marks) or a rock. Click a pipe to pick it up, then click an open spot or
+  another pipe to swap them (click it again to put it back). Water that
+  reaches a closed block spills, so open blocks ahead of it.
 - **Classic**: the board is open and you place pieces from a queue of five.
 
 **Powers:** every run starts with one **Flow-freeze** and one **Reveal**
 (`START_POWERS`), on every difficulty, and every 100 rows adds another of each.
 Flow-freeze stops the water for 8 seconds while every pipe frosts over. Reveal
-opens every block on screen in one wave and disarms their alarms; rows above
+opens every block on screen in one wave; rows above
 the screen stay closed. They are pipe-framed cards in the panel (steel for
 Freeze, brass for Reveal) that stay for the whole run and dim when empty (Q and
 E on a keyboard).
@@ -103,28 +105,37 @@ onto the water's path to buy time.
 
 ## First-run walkthrough
 
-The very first game starts with a short walkthrough (`scripts/tutorial.gd`): a
-coach panel at the top of the board and a pulsing frame with a bouncing arrow
-on the thing to tap. It waits for the player to open a hatch, pick a pipe up,
-put it down and hold the screen, then explains the two powers and the AI SOLVE
-button (OK to continue, SKIP to end it). The pump's countdown waits while it
-runs. When it's finished or skipped the flag `tutorial_done` is saved and it
-never shows again.
+The very first game is played on a prepared board (`tutorial_start` in
+`scripts/generator.gd`): row 1 goes straight up from the pump, the hatch above
+the pump hides an empty slot and the hatch next to it hides the straight pipe
+that slot needs. The walkthrough (`scripts/tutorial.gd`) uses it, so every
+instruction is true: open the hatch above the pump (empty), open the one next
+to it (a straight pipe), pick it up, put it above the pump. Those steps follow
+the board itself, so they stay right whatever the player taps in between
+(holding a pipe that won't fit, it says to put it back first). Then it
+explains how the water flows, hold to speed up, the two powers (with the real
+numbers from `tuning.gd`) and AI SOLVE (OK to continue; there is no skip). A
+coach panel sits at the top of the board, everything but the target is dimmed
+(a spotlight), and a pulsing frame with a bouncing arrow points at it. The
+pump's countdown waits while it runs. When it's finished the flag
+`tutorial_done` is saved and it never shows again.
 
 ## AI SOLVE
 
 The button under the power cards hands the board to `scripts/ai_player.gd`, a
 bot that solves the puzzle the way a person would. A visible finger moves to
 every tap at a human pace (`AI_MOVE_SPEED`, `AI_THINK_MIN` / `AI_THINK_MAX`:
-about two taps a second, a little faster when it's in a hurry), and every tap
+about three taps a second, like a quick player, a little faster when it's in
+a hurry), and every tap
 goes through `try_place()`, exactly like the player's. It only uses what is on
 screen: it never reads a closed hatch or the generator's guaranteed path.
 
 **Planning.** Each time it decides, it plans the best route for the water from
 where the water is right now through everything open on screen: a Dijkstra
 search over (cell, side the water comes in from). Pipes that already fit cost
-almost nothing (reservoirs and narrow pipes even less, since they buy time), a
-swap costs more, pieces that are running short cost more still (it checks the
+almost nothing (reservoirs and narrow pipes even less, since they buy time),
+so it happily sends the water the long way round through pipes already in
+place - free time and extra points. A swap costs more, pieces that are running short cost more still (it checks the
 route's needs against the loose pipes on screen and searches again with
 penalties), and going down costs extra. It then picks where the route should
 stop: off the top of the screen if it can, else at a closed hatch (rated lower
@@ -147,22 +158,30 @@ rebuilds that spot afterwards.
    open in time;
 4. look before you leap: open the hatch where the route stops before building
    towards it, unless a fix near the water can't wait;
-5. fix the most urgent cell, with a narrow pipe if the water is close or fast
-   (it slows the water), taking pipes from rows the water has already passed
-   first; if no pipe fits anywhere on screen, Reveal or open the hatches
-   nearest that cell;
+5. fix the most urgent cell. Choosing the pipe to fetch: two-for-one swaps
+   first (a pipe from another route cell that wants exactly the pipe being
+   replaced - one swap fixes both), narrow pipes next (they slow the water),
+   then pipes from rows the water has already passed, then the nearest; if no
+   pipe fits anywhere on screen, Reveal or open the hatches nearest that cell;
 6. open more hatches when the route is stuck or short of pieces;
 7. fix the rest of the route, nearest the water first;
-8. with the route built off the top of the screen, hold the screen to speed
-   the water up (it lets go as soon as there's work or the water gets close);
-9. in spare time, open hatches ahead so the next plan has more to work with.
+8. in spare time, upgrade pipes on the route to narrow ones of the same shape
+   (each makes the water take 2.5x as long there), when that gains more time
+   than the swap costs;
+9. with the route built off the top of the screen and the water still slow,
+   hold the screen to speed it up (it lets go as soon as there's work or the
+   water gets close);
+10. open hatches ahead so the next plan has more to work with.
 
 The player's taps on the board are ignored while it plays; STOP AI gives the
 board back. A run the AI played any part of doesn't set a best score.
 
-`tests/ai_bench.gd` plays seeded games and reports how far it gets. Recent
-results (5 games each): Medium rows 83-194 (median 138), Hard rows 62-166
-(median 139); it loses when the water gets faster than human-speed tapping.
+`tests/ai_bench.gd` plays seeded games and reports how far it gets (up to row
+400). Latest results (5 games each): Medium rows 195-334 (median 263), Hard
+rows 159-400+ (median 244, one still going at row 400) - about 1.8x further
+than the first version of this planner (Medium median 150, Hard 143). It
+loses when the water, at its top speed, outpaces what human-speed tapping can
+build.
 
 ## Rules
 
@@ -205,8 +224,6 @@ Every difficulty knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `DEFAULT_MODE` | "unlock" | Game mode ("unlock" or "classic") |
 | `UNLOCK_PIECE_FILL` | 0.72 | Chance a closed block hides a pipe (else an open spot) |
 | `UNLOCK_SPINE_PIECE_CHANCE` | 0.5 | Chance a path tile already hides the pipe it needs |
-| `ALARM_START_ROW` / `ALARM_CHANCE` | 15 / 0.07 | Alarm traps |
-| `ALARM_SURGE_TIME` / `ALARM_SURGE_MULT` | 4 s / 1.8x | Alarm surge |
 | `FLIP_TIME` | 0.3 s | Unlock flip animation |
 | `DIFFICULTY_SPEED` | easy 0.5, medium 1.0, hard 1.25 | Water speed multiplier per menu difficulty |
 | `DEFAULT_DIFFICULTY` | "medium" | Difficulty for Enter on the menu before a button is picked |
@@ -275,8 +292,9 @@ every way the water can be stopped, and generates 250 seeds x 420 rows to prove
 each one solvable. `game_test.gd` drives the real scene with input events:
 the difficulty menu and each difficulty's water speed, the starting powers,
 height and score in the panel, placing, replacing, unlocking and swapping,
-narrow pipes, alarms, pause, the countdown, the +1 / +3 scoring on a cross loop,
-hold to speed up (finger and F), every step of the walkthrough and SKIP, the AI
+narrow pipes, pause, the countdown, the +1 / +3 scoring on a cross loop,
+hold to speed up (finger and F), the prepared walkthrough board and every
+step of the walkthrough (including putting back a wrong pipe; no SKIP), the AI
 SOLVE bot climbing 25 rows by itself at under 4 taps a second without stalling,
 rebuilding its route after a pipe on it is broken, holding to speed up, and
 not setting a best score, and a 165-row run through four zones.
