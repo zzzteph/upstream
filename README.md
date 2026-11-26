@@ -22,10 +22,10 @@ The pump's pressure gauge counts down to the first surge. After that, the water 
 - **Three difficulties.** **Easy** runs the water at half speed, **Medium** is the standard pace and **Hard** is 25% faster. Each keeps its own best score.
 - **Crack it open, then plan.** Tap a hatch to flip it. Behind it you might find a pipe, an empty slot, a rock or an alarm trap. Tap a pipe, then tap where it should go. Closed hatches are light, raised steel, and empty slots are dark sockets, so you can always tell them apart.
 - **Buy yourself time.** Narrow pipes and reservoirs slow the water down, so drag them onto its path when things get tight.
-- **Emergency powers.** Every run starts with one **Flow-freeze**, which locks every pipe in ice and stops the water cold, and one **Reveal**, which flips every hatch on the map open in one wave. You earn another of each every 100 rows.
+- **Emergency powers.** Every run starts with one **Flow-freeze**, which locks every pipe in ice and stops the water cold, and one **Reveal**, which flips every hatch on screen open in one wave. You earn another of each every 100 rows.
 - **A shaft that fights back.** As you climb, you'll meet more rocks, one-way valves and alarms that make the water surge.
 - **Five zones.** Climb from the Sewer through the Factory, Neon, Magma and out into Space.
-- **Straightforward scoring.** +1 for every tube the water fills and +3 for every row it climbs. There are no multipliers and no bonus pickups, so your score only ever reflects how well you played. Your best score on each difficulty is saved.
+- **Straightforward scoring.** +1 for every tube the water fills and +3 for every row it climbs. There are no multipliers and no bonus pickups, so your score only ever reflects how well you played. Your best score on each difficulty is saved and shown on the main menu.
 - **Made for phones.** One-thumb touch controls and a portrait layout with every control in one bar along the bottom, plus haptics where your phone supports them.
 - **A pump-station look.** Steel plates, rivets, hazard stripes and glowing water, with a subtle PS1-era finish.
 

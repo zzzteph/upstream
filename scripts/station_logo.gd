@@ -33,12 +33,11 @@ func _process(dt: float) -> void:
 		queue_redraw()
 
 
-## Fit the plate into `width` pixels (never larger than its design size).
-func fit_width(width: float) -> void:
-	var k := 1.0
-	var full := _plate_size(1.0).x + 12.0
-	if full > width:
-		k = maxf(0.4, width / full)
+## Fit the plate into `width` x `height` pixels (never larger than its design size).
+func fit_width(width: float, height := INF) -> void:
+	var full := _plate_size(1.0) + Vector2(12.0, 10.0)
+	var k := minf(1.0, minf(width / full.x, height / full.y))
+	k = maxf(0.4, k)
 	if not is_equal_approx(k, scale_k):
 		scale_k = k
 		_update_size()

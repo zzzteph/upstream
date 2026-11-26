@@ -54,7 +54,8 @@ resolution. The board takes about 130 draw calls, and game scripts take about
 
 ## Difficulty and modes
 
-The main menu has three buttons, EASY, MEDIUM and HARD. They multiply the
+The main menu shows the best score for each difficulty above the nameplate,
+and three buttons in a column, EASY, MEDIUM and HARD. They multiply the
 water's speed by 0.5, 1 and 1.25 (`DIFFICULTY_SPEED` in `scripts/tuning.gd`) on
 top of the height-based speed-up. Each difficulty keeps its own best score
 (`upstream_score_<difficulty>`; scores from the old bonus-based scoring, saved
@@ -76,9 +77,10 @@ The game plays in unlock mode; set `DEFAULT_MODE` in `scripts/tuning.gd` to
 **Powers:** every run starts with one **Flow-freeze** and one **Reveal**
 (`START_POWERS`), on every difficulty, and every 100 rows adds another of each.
 Flow-freeze stops the water for 8 seconds while every pipe frosts over. Reveal
-opens every block on the current map in one wave and disarms the alarms. Their
-buttons stay in the panel for the whole run and dim when empty (Q and E on a
-keyboard).
+opens every block on screen in one wave and disarms their alarms; rows above
+the screen stay closed. They are pipe-framed cards in the panel (steel for
+Freeze, brass for Reveal) that stay for the whole run and dim when empty (Q and
+E on a keyboard).
 
 **Narrow pipes** (thinner steel tubes with a ring in the middle) connect like
 normal pipes but the water takes 2.5x as long to get through them, so swap them
@@ -93,7 +95,7 @@ onto the water's path to buy time.
 | Place the next piece (classic mode) | Click / tap an empty tile | Same |
 | Replace a dry pipe (classic, 1 s lock) | Click / tap it | Same |
 | Fast-forward (x5 flow, until game over) | (keyboard only) | F |
-| Flow-freeze / Reveal (after row 100) | Snowflake / eye buttons | Q / E |
+| Flow-freeze / Reveal | Snowflake / eye cards in the panel | Q / E |
 | Pause | (pauses by itself when you switch apps) | P / Esc |
 | Mute | In the pause menu | M |
 | Restart | Play again | R |

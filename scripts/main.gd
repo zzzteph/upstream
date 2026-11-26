@@ -410,9 +410,13 @@ func use_reveal() -> bool:
 	if reveals <= 0 or (state != State.COUNTDOWN and state != State.RUNNING) or paused:
 		sfx.play("deny")
 		return false
+	# Only what's on screen: from the row at the bottom edge to the (partly
+	# visible) row at the top edge. Rows further up stay closed.
 	var base := floori(cam.y)
+	var lo := maxi(grid.floor_row, base)
+	var hi := mini(grid.top_row, floori(cam.y + cam.visible_rows))
 	var count := 0
-	for r in range(grid.floor_row, grid.top_row + 1):
+	for r in range(lo, hi + 1):
 		var any := false
 		for c in Tuning.COLS:
 			var t := grid.get_tile(c, r)
@@ -427,12 +431,12 @@ func use_reveal() -> bool:
 			grid.touch(r)
 			renderer.animate_row(r, time + maxf(0.0, r - base) * 0.045 + 0.1 + Tuning.FLIP_TIME + 0.05)
 	if count == 0:
-		ui.show_toast("Nothing left to reveal", Color("8fa3ab"))
+		ui.show_toast("Nothing on screen to reveal", Color("8fa3ab"))
 		sfx.play("deny")
 		return false
 	reveals -= 1
 	sfx.play("reveal")
-	ui.show_toast("MAP REVEALED", Color("8fe8ff"))
+	ui.show_toast("REVEALED", Color("ffd86a"))
 	return true
 
 
@@ -756,21 +760,21 @@ func _compute_layout() -> void:
 	if portrait:
 		# Board on top, a control bar along the bottom:
 		# [hand / queue] [height + score] [freeze] [reveal]
-		var bottom_h := clampf(view_size.y * 0.14, 120.0, 170.0)
+		var bottom_h := clampf(view_size.y * 0.17, 140.0, 200.0)
 		var avail_w := view_size.x - 40.0
 		var avail_h := view_size.y - bottom_h
 		T = _tile_size(minf(avail_w / Tuning.COLS, avail_h / min_rows))
 		var bw := T * Tuning.COLS
 		board_rect = Rect2(_px((view_size.x - bw) * 0.5), 0.0, bw, _px(view_size.y - bottom_h))
 		queue_rect = Rect2(8.0, board_rect.end.y + 6.0, view_size.x - 16.0, bottom_h - 14.0)
-		var s0 := queue_rect.size.y - 34.0
+		var s0 := minf(queue_rect.size.y - 34.0, 88.0)
 		# Power buttons: big thumb targets at the right end of the bar.
 		var bar_h := queue_rect.size.y - 24.0
-		var pw := bar_h * 0.7
+		var pw := minf(bar_h * 0.78, 120.0)
 		reveal_rect = Rect2(queue_rect.end.x - 12.0 - pw, queue_rect.position.y + 12.0, pw, bar_h)
-		freeze_rect = Rect2(reveal_rect.position.x - 8.0 - pw, reveal_rect.position.y, pw, bar_h)
+		freeze_rect = Rect2(reveal_rect.position.x - 14.0 - pw, reveal_rect.position.y, pw, bar_h)
 		var x := queue_rect.position.x + 14.0
-		var y := queue_rect.position.y + 24.0
+		var y := queue_rect.position.y + 24.0 + maxf(0.0, (queue_rect.size.y - 34.0 - s0) * 0.5)
 		_slots.append(Rect2(x, y, s0, s0))
 		x += s0 + 12.0
 		if not unlock:
@@ -784,7 +788,7 @@ func _compute_layout() -> void:
 	else:
 		# Board on the left, a panel on the right:
 		# HAND (or the queue), height + score, then the power buttons.
-		var panel_w := clampf(view_size.x * 0.17, 150.0, 220.0)
+		var panel_w := clampf(view_size.x * 0.2, 150.0, 260.0)
 		var avail_w := view_size.x - panel_w - 80.0
 		T = _tile_size(minf(avail_w / Tuning.COLS, view_size.y / min_rows))
 		var bw := T * Tuning.COLS
@@ -795,11 +799,11 @@ func _compute_layout() -> void:
 		var tall := view_size.y >= 600.0
 		var cx := queue_rect.get_center().x
 		var y := queue_rect.position.y + 40.0
-		var ph := 64.0 if tall else 50.0
-		var half := (panel_w - 24.0 - 8.0) * 0.5
+		# Power buttons: two big full-width buttons at the bottom of the panel.
+		var ph := 112.0 if tall else 60.0
 		var bottom := queue_rect.end.y - 12.0
-		freeze_rect = Rect2(queue_rect.position.x + 12.0, bottom - ph, half, ph)
-		reveal_rect = Rect2(freeze_rect.end.x + 8.0, freeze_rect.position.y, half, ph)
+		reveal_rect = Rect2(queue_rect.position.x + 12.0, bottom - ph, panel_w - 24.0, ph)
+		freeze_rect = Rect2(reveal_rect.position.x, reveal_rect.position.y - 16.0 - ph, panel_w - 24.0, ph)
 		var stats_h := 136.0 if tall else 100.0
 		var slots_bottom := freeze_rect.position.y - 10.0 - stats_h - 16.0
 		if unlock:

@@ -86,7 +86,17 @@ func _run() -> void:
 		var b: Button = game.ui.difficulty_buttons[d]
 		check(b.is_visible_in_tree() and screen.encloses(b.get_global_rect()), "the menu shows a %s button on screen" % d.to_upper())
 	check(not (load("res://scripts/station_logo.gd") as Script).get_script_constant_map().has("SUBTITLE"), "the nameplate has no subtitle")
-	click(Vector2(game.view_size.x * 0.5, game.view_size.y * 0.92))
+	var be: Rect2 = (game.ui.difficulty_buttons["easy"] as Button).get_global_rect()
+	var bm: Rect2 = (game.ui.difficulty_buttons["medium"] as Button).get_global_rect()
+	var bhd: Rect2 = (game.ui.difficulty_buttons["hard"] as Button).get_global_rect()
+	check(is_equal_approx(be.get_center().x, bm.get_center().x) and is_equal_approx(bm.get_center().x, bhd.get_center().x)
+			and be.end.y <= bm.position.y and bm.end.y <= bhd.position.y, "EASY, MEDIUM and HARD are stacked in one column")
+	var logo_top: float = game.ui.logo.get_global_rect().position.y
+	for d in Tuning.DIFFICULTIES:
+		var bl: Label = game.ui.best_labels[d]
+		check(bl.is_visible_in_tree() and bl.get_global_rect().end.y <= logo_top and bl.text == "%d" % SaveData.load_best(d),
+				"the %s best score is shown above UPSTREAM" % d)
+	click(Vector2(game.view_size.x * 0.06, game.view_size.y * 0.5))
 	await frames(1)
 	check(game.state == S.TITLE, "clicking beside the buttons does not start a game")
 	click(game.ui.new_game_button.get_global_rect().get_center())
@@ -180,6 +190,10 @@ func _run() -> void:
 	check(game.last_reason == "empty", "spills on the empty tile (got %s)" % game.last_reason)
 	await frames(100)
 	check(game.state == S.GAMEOVER and game.ui.over_screen.visible, "game over screen shows")
+	var again_ok := false
+	for b in game.ui.over_screen.find_children("*", "Button", true, false):
+		again_ok = again_ok or (b as Button).text == "PLAY AGAIN"
+	check(again_ok, "the game-over button reads PLAY AGAIN (no key hint)")
 	check(not game.fast_forward, "fast-forward ends at game over")
 	key(KEY_R)
 	await frames(1)
@@ -365,14 +379,25 @@ func _run() -> void:
 	await frames(2)
 	check(game.ui.btn_freeze.visible and game.ui.btn_reveal.visible, "power buttons are shown while you have charges")
 	check(screen.encloses(game.ui.btn_freeze.get_global_rect()) and screen.encloses(game.ui.btn_reveal.get_global_rect()), "power buttons are fully on screen")
+	check(game.freeze_rect.size.y >= 56.0 and game.freeze_rect.size.x >= 120.0 and not game.freeze_rect.intersects(game.reveal_rect),
+			"power buttons are big (%s) and don't overlap" % game.freeze_rect.size)
 	click(game.ui.btn_reveal.get_global_rect().get_center())
 	await frames(1)
+	var lo_r: int = maxi(game.grid.floor_row, floori(game.cam.y))
+	var hi_r: int = floori(game.cam.y + game.cam.visible_rows)
 	var still_hidden := 0
-	for r in range(game.grid.floor_row, game.grid.top_row + 1):
+	for r in range(lo_r, hi_r + 1):
 		for c in Tuning.COLS:
 			if game.grid.get_tile(c, r).hidden:
 				still_hidden += 1
-	check(still_hidden == 0 and game.reveals == 1, "Reveal unlocks the whole current map (%d still locked)" % still_hidden)
+	var above_hidden := 0
+	for r in range(hi_r + 1, game.grid.top_row + 1):
+		for c in Tuning.COLS:
+			if game.grid.get_tile(c, r).hidden:
+				above_hidden += 1
+	check(still_hidden == 0 and game.reveals == 1, "Reveal opens every block on screen (%d still closed)" % still_hidden)
+	check(game.grid.top_row > hi_r and above_hidden == (game.grid.top_row - hi_r) * Tuning.COLS,
+			"Reveal leaves the rows above the screen closed (%d of %d)" % [above_hidden, (game.grid.top_row - hi_r) * Tuning.COLS])
 	game._start_flow()
 	await frames(20)
 	click(game.ui.btn_freeze.get_global_rect().get_center())
