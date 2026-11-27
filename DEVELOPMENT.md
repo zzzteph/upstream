@@ -146,7 +146,7 @@ onto the water's path to buy time.
 | Pick up a pipe, then swap it (unlock mode) | Click / tap the pipe, then the spot | Same |
 | Place the next piece (classic mode) | Click / tap an empty tile | Same |
 | Replace a dry pipe (classic, 1 s lock) | Click / tap it | Same |
-| Speed up (x4 water and countdown, 2x points per tube, both +10% per tube held through, up to x8 / 4x) | Hold anywhere on the board or panel (0.3 s) | Hold F |
+| Speed up (x4 water and countdown, 2x points per tube, both +10% per tube held through, up to x8 / 4x) | Hold anywhere on the board or panel (0.5 s) | Hold F |
 | Watch the solver play a game | SOLVER on the menu | |
 | Flow-freeze / Reveal | FREEZE / REVEAL buttons in the panel | Q / E |
 | Pause | The pause button at the top of the panel (also pauses by itself when you switch apps) | P / Esc |
@@ -355,7 +355,7 @@ Every knob is in [`scripts/tuning.gd`](scripts/tuning.gd):
 | `START_POWERS` | 1 | Flow-freezes and Reveals at the start of every run |
 | `HOLD_SPEED_MULT` / `HOLD_SPEED_MAX` | 4x / 8x | Speed when you start holding the screen, and its ceiling |
 | `HOLD_SCORE_MULT` / `HOLD_SCORE_MAX` | 2x / 4x | Points per tube when you start holding, and their ceiling |
-| `HOLD_RAMP` / `HOLD_DELAY` | 0.1 / 0.3 s | What each tube held through adds (10% of the starting x); how long a press must last |
+| `HOLD_RAMP` / `HOLD_DELAY` | 0.1 / 0.5 s | What each tube held through adds (10% of the starting x); how long a press must last |
 | `AI_CURVY` / `AI_CURVY_UNTIL_SPEED` | 25 / 3.0x | How hard the solver snakes wall to wall, and the speed where it stops |
 | `AI_MOVE_SPEED` / `AI_THINK_MIN` / `AI_THINK_MAX` | 1400 px/s / 0.06 s / 0.18 s | Solver finger speed and pause between taps |
 | `POWER_AWARD_ROWS` / `FREEZE_TIME` | 100 / 8 s | Rows per extra Flow-freeze + Reveal pair; freeze length |

@@ -190,7 +190,7 @@ func _process(dt: float) -> void:
 			_target = b  # Hold anywhere on the board.
 			if game.speed_held():
 				_held_for += dt
-				if _held_for > 0.6:
+				if _held_for > 0.4:  # Plus HOLD_DELAY before it counts: about a second in all.
 					_go(Step.POWERS)
 		Step.POWERS:
 			_set_text("FREEZE stops the water for %d seconds. REVEAL opens every hatch on screen. You start with one of each and get another every %d rows." % [int(Tuning.FREEZE_TIME), Tuning.POWER_AWARD_ROWS])

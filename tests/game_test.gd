@@ -482,6 +482,8 @@ func _run() -> void:
 	press_at(spot)
 	await frames(2)
 	check(not game.speed_held(), "a quick press doesn't speed anything up")
+	await frames(22)
+	check(not game.speed_held(), "nor does a slow click (0.4 s)")
 	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
 	check(game.speed_held() and is_equal_approx(game.effective_speed(), game.height_speed() * Tuning.HOLD_SPEED_MULT),
 			"holding the screen speeds the water up x%d" % int(Tuning.HOLD_SPEED_MULT))
@@ -494,6 +496,10 @@ func _run() -> void:
 	var sc0: int = game.score
 	game._handle_event({"type": "filled", "tile": tube, "col": 0, "row": 1, "channel": 0})
 	check(game.score - sc0 == Tuning.SCORE_TUBE, "a tube scores +1 normally")
+	# A fresh run: holding at x4 above has nearly brought the water to a hatch.
+	game.start_run()
+	await frames(1)
+	game._start_flow()
 	press_at(spot)
 	await frames(int(Tuning.HOLD_DELAY * 60.0) + 4)
 	sc0 = game.score
