@@ -7,16 +7,6 @@ extends Node2D
 
 enum State { TITLE, COUNTDOWN, RUNNING, SPILL, GAMEOVER }
 
-const REASONS := {
-	"rock": "The water smashed into a rock.",
-	"empty": "The water poured out onto an empty tile.",
-	"leak": "",    # Plain enough on screen; no message.
-	"wall": "The water hit the wall.",
-	"oneway": "The water hit a one-way pipe from the wrong side.",
-	"clogged": "The water ran into a pipe that was already full.",
-	"locked": "",  # Plain enough on screen; no message.
-}
-
 var state := State.TITLE
 var paused := false
 var mode: String = Tuning.DEFAULT_MODE:  ## "unlock" (BioShock-style) or "classic" (piece queue).
@@ -441,7 +431,7 @@ func _update_spill(dt: float) -> void:
 		renderer.burst(spill["p"], spill["col"], 2, 2.2, 0.06, 0.8, 9.0)
 	if spill_timer <= 0.0:
 		state = State.GAMEOVER
-		ui.show_game_over(REASONS.get(last_reason, "The water spilled."), score, height, best, new_best, actions_per_second())
+		ui.show_game_over(score, height, best, new_best, actions_per_second())
 
 
 func _ensure_rows() -> void:

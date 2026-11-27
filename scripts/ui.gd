@@ -237,7 +237,6 @@ var _best_caption: Label
 var logo: StationLogo
 var pause_screen: Control
 var over_screen: Control
-var over_reason: Label
 var over_score: Label
 var over_height: Label
 var over_best: Label
@@ -544,9 +543,6 @@ func _build_over() -> void:
 	vb.add_theme_constant_override("separation", 8)
 	panel.add_child(vb)
 	vb.add_child(_slabel("LEAK DETECTED", 64, Color("ff6a3a"), 14))
-	over_reason = _slabel("", 22, Color(1, 1, 1, 0.85), 6)
-	over_reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vb.add_child(over_reason)
 	over_score = _slabel("", 54, Color.WHITE, 12)
 	vb.add_child(over_score)
 	over_height = _label("", 26, WATER.lightened(0.3), 6)
@@ -586,9 +582,8 @@ func show_pause(p: bool) -> void:
 	pause_screen.visible = p
 
 
-func show_game_over(reason: String, score: int, height: int, best: int, is_new: bool, aps := 0.0) -> void:
-	over_reason.text = reason
-	over_reason.visible = reason != ""
+## Game over: just LEAK DETECTED and the numbers (no "why" sentence).
+func show_game_over(score: int, height: int, best: int, is_new: bool, aps := 0.0) -> void:
 	over_score.text = "%d" % score
 	over_height.text = "HEIGHT  %d rows" % height
 	over_best.text = "BEST  %d" % best
@@ -786,7 +781,6 @@ func _apply_layout() -> void:
 	logo.fit_width(vs.x - 24.0, maxf(60.0, minf(vs.y * (0.3 if short else 0.36), vs.y - used)))
 	solver_button.custom_minimum_size = Vector2(minf(220.0, bw * 0.7), ai_h)
 	solver_button.add_theme_font_size_override("font_size", 18 if short else 20)
-	over_reason.custom_minimum_size = Vector2(minf(420.0, vs.x - 96.0), 0)
 	_stats_key = []
 	new_game_button.custom_minimum_size = Vector2(bw, bh)
 	new_game_button.add_theme_font_size_override("font_size", 28 if short else 34)

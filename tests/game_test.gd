@@ -344,7 +344,7 @@ func _run() -> void:
 		guard += 1
 	check(game.last_reason == "locked", "goo reaching a locked tile spills (got %s)" % game.last_reason)
 	await frames(120)
-	check(game.state == S.GAMEOVER and not game.ui.over_reason.visible, "no message on the game-over screen for a closed block")
+	check(game.state == S.GAMEOVER and not "over_reason" in game.ui, "the game-over screen just says LEAK DETECTED (no reason sentence)")
 	# A long unlock-mode run, played by the autoplay bot through the same clicks.
 	game.start_run()
 	game.debug_autoplay = true
@@ -366,7 +366,7 @@ func _run() -> void:
 	check(game.freezes == Tuning.START_POWERS and game.reveals == Tuning.START_POWERS, "the run starts with one Flow-freeze and one Reveal")
 	check(game.ui.btn_freeze.visible and game.ui.btn_reveal.visible, "power buttons are there from the start")
 	check(SaveData.KEY == "upstream_score_medium", "the best score keeps the old Medium record")
-	game.ui.show_game_over("", 10, 1, 20, false)
+	game.ui.show_game_over(10, 1, 20, false)
 	check(game.ui.over_best.text == "BEST  20", "game over shows the best score")
 	game.ui.over_screen.visible = false
 
