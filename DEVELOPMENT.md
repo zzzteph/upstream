@@ -49,11 +49,43 @@ One-time setup: in the repository's **Settings > Pages**, set **Source** to
 ## Frame rate
 
 The game has no frame cap: it runs at the display's refresh rate (120 Hz or
-more on high-refresh screens; browsers follow the display too). To keep each
-frame cheap, static art is rasterised once into sprite atlases, board rows are
-cached and only redrawn when they change, and the board renders at low
-resolution. The board takes about 130 draw calls, and game scripts take about
-2 ms per frame in the browser even on a slow test machine.
+more on high-refresh screens; browsers follow the display too). The aim is
+that play feels instant even on a cheap phone, so every frame is kept small:
+
+- Static art is rasterised once into sprite atlases; board rows are cached
+  and only redrawn when they change; the board renders at low resolution.
+- The tile the water is in stamps its dry pipe from the atlas and draws only
+  the water as vectors.
+- Bubbles in full pipes are worked out once per row change, then only moved.
+  Particles live in packed arrays, not a Dictionary each. Snow and spill
+  spray spawn per second, not per frame, so 120 Hz doesn't double them.
+- The frost of a Flow-freeze is drawn once, then moved and faded.
+- The backdrop uses a table of random numbers and skips whatever is behind
+  the board or panel. The full-screen flash layer only exists while flashing.
+- About 90-110 draw calls a frame.
+- **Quality steps down by itself** (`quality` in `main.gd`): after 3 s of
+  slow frames (under ~45 a second) while playing, the decorative motion goes
+  (background bubbles and decorations, bubbles in pipes, particle glow);
+  if it's still slow, the board renders at 3/4 resolution. Low-memory phones
+  (2 GB or less) start at the lighter level. `?quality=0|1|2` forces it.
+- The web page renders at most 2 device pixels per CSS pixel (1.5 on
+  low-memory phones), so 3x phone screens don't push 2.25x the pixels.
+
+The solver plans on a snapshot of the visible rows in packed arrays (states
+are ints, the heap is inlined): about 1 ms for a fresh plan on a desktop CPU,
+and an unchanged board reuses the last plan (40 us).
+
+## Web page
+
+`export_presets.cfg` adds a small script to the page head (`html/head_include`;
+the same script is in the claude.ai artifact page). It caps the pixel ratio
+(above), and makes sound work on phones: browsers only let audio start from
+a tap, so it keeps the engine's AudioContext and resumes it on every touch
+end, pointer up, mouse down, key and click (iPhones count touchend, not
+touchstart), plays a one-sample silent buffer inside the tap (some iOS
+versions need a sound to start there), resumes again when the page comes
+back from the background, and on iPhone sets the audio session to playback
+so the game is heard with the silent switch on.
 
 ## Menu and modes
 

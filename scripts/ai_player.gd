@@ -44,59 +44,11 @@ var last_plan := {}              ## The most recent plan (debugging / tests).
 var _danger := false             ## The last decision saw the water about to win.
 var tally := {}                  ## Taps by kind (debugging / tests).
 var trace: Array = []            ## Recent decisions, when debugging (set trace_on).
+var _plan_key: Array = []         ## What the last plan was made from (see _plan).
+var _plan_cache := {}
 var trace_on := false
 var _layer: CanvasLayer
 var _view: Control
-
-
-## A binary min-heap of (cost, state) for the route search.
-class MinHeap:
-	var k: Array = []
-	var v: Array = []
-
-	func is_empty() -> bool:
-		return k.is_empty()
-
-	func push(key: float, val) -> void:
-		k.append(key)
-		v.append(val)
-		var i := k.size() - 1
-		while i > 0:
-			var p := (i - 1) >> 1
-			if k[p] <= k[i]:
-				break
-			_swap(i, p)
-			i = p
-
-	func pop():
-		var top = v[0]
-		var last := k.size() - 1
-		k[0] = k[last]
-		v[0] = v[last]
-		k.pop_back()
-		v.pop_back()
-		var i := 0
-		var n := k.size()
-		while true:
-			var l := i * 2 + 1
-			var m := i
-			if l < n and k[l] < k[m]:
-				m = l
-			if l + 1 < n and k[l + 1] < k[m]:
-				m = l + 1
-			if m == i:
-				break
-			_swap(i, m)
-			i = m
-		return top
-
-	func _swap(a: int, b: int) -> void:
-		var tk = k[a]
-		k[a] = k[b]
-		k[b] = tk
-		var tv = v[a]
-		v[a] = v[b]
-		v[b] = tv
 
 
 class PointerView:
@@ -303,6 +255,19 @@ func _water() -> Dictionary:
 
 ## Rows the AI may tap: their centres are on screen.
 func _rows() -> Vector2i:
+	var f := Engine.get_process_frames()
+	if f == _rows_frame:
+		return _rows_val
+	_rows_frame = f
+	_rows_val = _rows_now()
+	return _rows_val
+
+
+var _rows_frame := -1
+var _rows_val := Vector2i.ZERO
+
+
+func _rows_now() -> Vector2i:
 	var lo: int = maxi(game.grid.floor_row, floori(game.cam.y))
 	var hi: int = lo
 	for r in range(lo, game.grid.top_row + 1):
@@ -315,6 +280,18 @@ func _rows() -> Vector2i:
 
 ## Loose pipes on screen, by piece: {piece: [cells]}.
 func _pool() -> Dictionary:
+	var f := Engine.get_process_frames()
+	if f != _pool_frame:
+		_pool_frame = f
+		_pool_val = _pool_now()
+	return _pool_val
+
+
+var _pool_frame := -1
+var _pool_val := {}
+
+
+func _pool_now() -> Dictionary:
 	var pool := {}
 	var rows := _rows()
 	for r in range(rows.x, rows.y + 1):
@@ -379,6 +356,16 @@ func _plan(w: Dictionary) -> Dictionary:
 	var rows := _rows()
 	var lo: int = maxi(rows.x, int(w["row"]) - 2)
 	var hi: int = rows.y
+	# Nothing changed since the last plan (same board, same cell for the
+	# water, same hand)? Reuse it, with the times moved on by how far the
+	# water has got through its cell. (The hold check asks every 0.1 s.)
+	var vsum := 0
+	for r in range(lo, hi + 1):
+		vsum += game.grid.version(r)
+	var key := [int(w["c"]), int(w["r"]), int(w["e"]), lo, hi, vsum, game.held_piece, game.held_from, _danger, snappedf(_speed(), 0.05)]
+	if key == _plan_key and not _plan_cache.is_empty():
+		return _shifted(_plan_cache, float(_plan_cache["t0"]) - float(w["t0"]))
+	_snapshot(lo, hi)
 	var pool := _pool()
 	var have := {}
 	for p in pool:
@@ -431,73 +418,344 @@ func _plan(w: Dictionary) -> Dictionary:
 			if attempt >= 1:
 				# Still short: only count the pipes that are really spare.
 				have[p] = maxi(0, int(want[p]) - int(short[p]))
+	_plan_key = key
+	_plan_cache = best
+	_plan_cache["t0"] = float(w["t0"])
 	return best
+
+
+## A copy of a plan with every arrival time `dt` seconds sooner.
+func _shifted(plan: Dictionary, dt: float) -> Dictionary:
+	var out := plan.duplicate(true)
+	if dt == 0.0:
+		return out
+	for cell in out["cells"]:
+		cell["arrive"] = float(cell["arrive"]) - dt
+	for n in out["needs"]:
+		n["arrive"] = float(n["arrive"]) - dt
+	out["arrive_end"] = float(out["arrive_end"]) - dt
+	return out
+
+
+## The rows the planner looks at, read once per plan into flat arrays so the
+## search never touches the grid. Cells are indexed (r - lo + 1) * SW + c + 1:
+## a border of off-board cells all round (walls, the row below the range, the
+## row above the screen).
+const SW := Tuning.COLS + 2
+var _s_lo := 0
+var _s_hi := 0
+var _s_rows := 0
+var _s_fit := PackedFloat32Array()   ## cell * 16 + en * 4 + ex: cost through the pipe already there, or -1.
+var _s_swap := PackedByteArray()     ## 1 = an open, visible cell whose pipe can be swapped.
+var _s_kind := PackedByteArray()     ## cell * 4 + entry: end kind (0 open, 1 hidden, 2 stuck, 3 dead), 255 = not worked out yet.
+var _s_esc := PackedInt32Array()     ## cell: ways on (see _escapes), -1 = not worked out yet.
+var _s_span := PackedInt32Array()    ## (row index) * COLS + entry column: see _row_span, -1 = not worked out yet.
+const KINDS := ["open", "hidden", "stuck", "dead"]
+static var NEED := PackedInt32Array()   ## en * 4 + ex -> the piece that takes the water that way.
+static var EXIT := PackedInt32Array()     ## piece * 4 + entry -> exit side, or -1.
+static var CHAN := PackedInt32Array()     ## piece * 4 + entry -> fill channel.
+static var STRAIGHT := PackedByteArray()  ## piece -> 1 for the two straight pipes.
+static var OPP := PackedInt32Array([P.S, P.W, P.N, P.E])
+static var ORDER := PackedInt32Array([P.N, P.E, P.W, P.S])   ## The order the search tries exits in.
+static var DOFF := PackedInt32Array()     ## side -> cell index offset.
+var _s_open := PackedByteArray()          ## 1 = the water might get through (closed hatch, or open with no water).
+## What each cell is, for the end-of-route checks (rows lo-1 .. hi+1):
+## 0 nothing there, 1 closed hatch, 2 open with no water (any pipe can go
+## in), 3 a fixed pipe with no water, 4 blocked (rock, full pipe, ...).
+var _s_cls := PackedByteArray()
+var _s_pc := PackedInt32Array()           ## The pipe in a class-3 cell.
+var _s_ow := PackedInt32Array()           ## A one-way pipe's entry side, else -1.
+
+
+static func _tables() -> void:
+	if not NEED.is_empty():
+		return
+	NEED.resize(16)
+	for en in 4:
+		for ex in 4:
+			NEED[en * 4 + ex] = P.piece_for(en, ex) if en != ex else -1
+	EXIT.resize(P.COUNT * 4)
+	CHAN.resize(P.COUNT * 4)
+	STRAIGHT.resize(P.COUNT)
+	for pc in P.COUNT:
+		STRAIGHT[pc] = 1 if P.is_straight(pc) else 0
+		for en in 4:
+			EXIT[pc * 4 + en] = P.exit_dir(pc, en)
+			CHAN[pc * 4 + en] = P.channel_for(pc, en) if P.exit_dir(pc, en) >= 0 else 0
+	DOFF.resize(4)
+	for d in 4:
+		var dv: Vector2i = P.DIR_VEC[d]
+		DOFF[d] = dv.x + dv.y * SW
+
+
+## Read rows lo..hi into the snapshot arrays, and (one pass for both) the
+## loose pipes on screen into the pool.
+func _snapshot(lo: int, hi: int) -> void:
+	_tables()
+	_s_lo = lo
+	_s_hi = hi
+	_s_rows = hi - lo + 3
+	var n := _s_rows * SW
+	_s_fit.resize(n * 16)
+	_s_fit.fill(-1.0)
+	_s_swap.resize(n)
+	_s_swap.fill(0)
+	_s_open.resize(n)
+	_s_open.fill(0)
+	_s_cls.resize(n)
+	_s_cls.fill(0)
+	_s_pc.resize(n)
+	_s_ow.resize(n)
+	_s_kind.resize(n * 4)
+	_s_kind.fill(255)
+	_s_esc.resize(n)
+	_s_esc.fill(-1)
+	_s_span.resize(_s_rows * Tuning.COLS)
+	_s_span.fill(-1)
+	var rows := _rows()
+	var pool := {}
+	var grid = game.grid
+	var b: Rect2 = game.board_rect
+	var T: float = game.T
+	var cam_y: float = game.cam.y
+	for r in range(mini(rows.x, lo - 1), hi + 2):
+		# Visible: the cell's centre is on the board (see is_tile_visible).
+		var cy := b.end.y - (r + 0.5 - cam_y) * T
+		var vis: bool = r >= grid.floor_row and r <= grid.top_row and cy >= b.position.y and cy <= b.end.y
+		var row: Array = grid.rows.get(r, [])
+		if row.is_empty():
+			continue
+		var base := (r - lo + 1) * SW + 1
+		for c in Tuning.COLS:
+			var t: Tile = row[c]
+			if t == null:
+				continue
+			var hidden := t.hidden
+			var empty := t.kind == Tile.EMPTY
+			var goo: bool = t.fill_entry[0] >= 0 or t.fill_entry[1] >= 0
+			var pc := t.piece
+			if vis and empty and pc >= 0 and not t.fixed and not hidden and not goo and r <= hi:
+				if not pool.has(pc):
+					pool[pc] = []
+				pool[pc].append(Vector2i(c, r))
+			if r < lo - 1:
+				continue
+			var cell := base + c
+			var cls := 1 if hidden else (4 if not empty or goo else (3 if t.fixed else 2))
+			_s_cls[cell] = cls
+			if cls == 3:
+				_s_pc[cell] = pc
+				_s_ow[cell] = t.oneway_entry if t.special == Tile.SP_ONEWAY else -1
+			if r < lo or r > hi:
+				continue
+			if hidden or (empty and not goo):
+				_s_open[cell] = 1
+			if hidden or not empty:
+				continue
+			if pc >= 0:
+				var slow := t.special == Tile.SP_RESERVOIR or t.narrow
+				for en in 4:
+					var ex: int = EXIT[pc * 4 + en]
+					if ex < 0 or ex == en:
+						continue
+					if (t.special != Tile.SP_ONEWAY or t.oneway_entry == en) and t.fill_entry[CHAN[pc * 4 + en]] < 0:
+						_s_fit[cell * 16 + en * 4 + ex] = 0.1 if slow else 0.3
+			if vis and not t.fixed and not goo:
+				_s_swap[cell] = 1
+	_pool_frame = Engine.get_process_frames()
+	_pool_val = pool
 
 
 ## Dijkstra over (column, row, side the water comes in from, column where the
 ## route entered this row). The last part lets it snake: turning up costs
-## `curvy` for every column it could still have travelled towards the far wall.
+## `curvy` for every column it could still have travelled towards the far wall
+## (without snaking it isn't needed, so the search is 7 times smaller). States
+## are ints and live in packed arrays: this runs several times a second.
 func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Dictionary, curvy: float) -> Dictionary:
-	var start := Vector4i(w["c"], w["r"], w["e"], w["c"])
-	var spans := {}
-	var dist := {start: 0.0}
-	var prev := {}
-	var heap := MinHeap.new()
-	heap.push(0.0, start)
-	var done := {}
-	while not heap.is_empty():
-		var u: Vector4i = heap.pop()
-		if done.has(u):
+	var WD := Tuning.COLS if curvy > 0.0 else 1
+	var nstates := _s_rows * SW * 4 * WD
+	var hv := PackedInt32Array()
+	hv.resize(7)
+	var pen := PackedFloat32Array()
+	pen.resize(7)
+	for k in 7:
+		hv[k] = int(have.get(k, 0))
+		pen[k] = float(penalty.get(k, 0.0))
+	var dist := PackedFloat64Array()
+	dist.resize(nstates)
+	dist.fill(INF_COST)
+	var prev_id := PackedInt32Array()
+	prev_id.resize(nstates)
+	var prev_ex := PackedByteArray()
+	prev_ex.resize(nstates)
+	var prev_need := PackedInt32Array()
+	prev_need.resize(nstates)
+	var done := PackedByteArray()
+	done.resize(nstates)
+	var reached := PackedInt32Array()
+	var sc: int = w["c"]
+	var sr: int = w["r"]
+	if sr - lo + 1 < 0 or sr - lo + 1 >= _s_rows or sc < -1 or sc > Tuning.COLS:
+		# The water's next cell is outside the rows we look at: nowhere to go.
+		var k0 := _end_kind(Vector3i(sc, sr, int(w["e"])), hi)
+		return {"cells": [], "end": Vector2i(sc, sr), "kind": k0, "needs": [], "missing": 0,
+				"arrive_end": float(w["t0"]), "start_ok": k0 == "open"}
+	var start := ((((sr - lo + 1) * SW + sc + 1) * 4 + int(w["e"])) * WD) + (clampi(sc, 0, Tuning.COLS - 1) if WD > 1 else 0)
+	dist[start] = 0.0
+	reached.append(start)
+	# A binary heap, inlined (function calls are slow in GDScript), with a
+	# logical size so it never shrinks or reallocates.
+	var hk := PackedFloat64Array()
+	var hvals := PackedInt32Array()
+	hk.resize(512)
+	hvals.resize(512)
+	hk[0] = 0.0
+	hvals[0] = start
+	var hn := 1
+	var ncols := Tuning.COLS
+	var order := ORDER
+	var doff := DOFF
+	var opp := OPP
+	var need_t := NEED
+	var straight := STRAIGHT
+	var fit := _s_fit
+	var swp := _s_swap
+	var spans := _s_span
+	while hn > 0:
+		var u: int = hvals[0]
+		hn -= 1
+		if hn > 0:
+			var key: float = hk[hn]
+			var val: int = hvals[hn]
+			var i := 0
+			while true:
+				var l := i * 2 + 1
+				if l >= hn:
+					break
+				var m := l
+				if l + 1 < hn and hk[l + 1] < hk[l]:
+					m = l + 1
+				if hk[m] >= key:
+					break
+				hk[i] = hk[m]
+				hvals[i] = hvals[m]
+				i = m
+			hk[i] = key
+			hvals[i] = val
+		if done[u] == 1:
 			continue
-		done[u] = true
-		for ex in [P.N, P.E, P.W, P.S]:
-			if ex == u.z:
+		done[u] = 1
+		var uw := u % WD
+		var t1 := u / WD
+		var ue := t1 % 4
+		var cell := t1 / 4
+		var ry := cell / SW
+		var cx := cell % SW
+		var du: float = dist[u]
+		var fbase := cell * 16 + ue * 4
+		for j in 4:
+			var ex: int = order[j]
+			if ex == ue:
 				continue
-			var st := _step(u.x, u.y, u.z, ex, lo, hi, have, penalty)
-			if st[0] >= INF_COST:
-				continue
-			var cost: float = st[0]
-			var na := u.w
-			if ex == P.N or ex == P.S:
-				if ex == P.N and curvy > 0.0:
+			# The cost through this cell: a pipe that already fits is nearly
+			# free, a swap costs 11 + a shortage penalty, going down 6 more.
+			var cost: float = fit[fbase + ex]
+			var need := -1
+			if cost < 0.0:
+				if swp[cell] == 0:
+					continue
+				need = need_t[ue * 4 + ex]
+				var n: int = hv[need]
+				if straight[need] == 1:
+					n += hv[P.CROSS]
+				if n <= 0:
+					continue
+				cost = 11.0 + pen[need]
+			if ex == P.S:
+				cost += 6.0
+			var na := uw
+			if WD > 1 and (ex == P.N or ex == P.S):
+				var c := cx - 1
+				if ex == P.N:
 					# Only columns it could really have reached count: rocks,
 					# walls and full pipes end the row's span.
-					var key := Vector2i(u.y, u.w)
-					if not spans.has(key):
-						spans[key] = _row_span(u.y, u.w)
-					cost += curvy * float(maxi(0, int(spans[key]) - absi(u.x - u.w)))
-				na = u.x
-			var dv: Vector2i = P.DIR_VEC[ex]
-			var v := Vector4i(u.x + dv.x, u.y + dv.y, P.opposite(ex), na)
-			var nd: float = dist[u] + cost
-			if nd < float(dist.get(v, INF_COST)):
+					var sk := ry * ncols + uw
+					var span: int = spans[sk]
+					if span < 0:
+						span = _span_fast(ry, uw)
+						spans[sk] = span
+					cost += curvy * float(maxi(0, span - absi(c - uw)))
+				na = c
+			var v := (((cell + doff[ex]) * 4 + opp[ex]) * WD) + na
+			var nd: float = du + cost
+			if nd < dist[v]:
+				if dist[v] >= INF_COST:
+					reached.append(v)
 				dist[v] = nd
-				prev[v] = [u, ex, st[1]]
-				heap.push(nd, v)
+				prev_id[v] = u
+				prev_ex[v] = ex
+				prev_need[v] = need
+				if hn == hk.size():
+					hk.resize(hn * 2)
+					hvals.resize(hn * 2)
+				var i := hn
+				hn += 1
+				while i > 0:
+					var pi := (i - 1) >> 1
+					if hk[pi] <= nd:
+						break
+					hk[i] = hk[pi]
+					hvals[i] = hvals[pi]
+					i = pi
+				hk[i] = nd
+				hvals[i] = v
 	# Where should the route stop? As high as possible, then cheapest - but
 	# while snaking, every column travelled along the current row counts too
 	# (enough that reaching the far wall beats turning up early), so it opens
-	# the hatches along the row instead of rushing up. Try the candidates best
-	# first; skip any whose route would cross itself.
+	# the hatches along the row instead of rushing up.
 	var along := 50.0 * curvy / Tuning.AI_CURVY
-	var cands: Array = []
-	for u in dist:
-		var u3 := Vector3i(u.x, u.y, u.z)
-		var kind := _end_kind(u3, hi)
-		var height: float = u.y
+	var nr := reached.size()
+	var vals := PackedFloat64Array()
+	vals.resize(nr)
+	var kinds := PackedByteArray()
+	kinds.resize(nr)
+	for k in nr:
+		var id: int = reached[k]
+		var t1 := id / WD
+		var e := t1 % 4
+		var cell := t1 / 4
+		var r := cell / SW - 1 + lo
+		var c := cell % SW - 1
+		var kind: int = _s_kind[cell * 4 + e]
+		if kind == 255:
+			kind = _cell_kind(cell, c, r, e, hi)
 		var val := 0.0
+		var col_w := id % WD if WD > 1 else c
 		match kind:
-			"open":
+			0:
 				val = (hi + 2) * 100.0
-			"hidden":
+			1:
 				# A closed hatch with few ways out (walls, rocks around it) is a
 				# likely dead end: rate it lower.
-				val = height * 100.0 + 50.0 - (3 - _escapes(u3)) * 60.0 + along * absi(u.x - u.w)
-			"stuck":
-				val = height * 100.0 + 20.0 + along * absi(u.x - u.w)
+				var esc: int = _s_esc[cell]
+				if esc < 0:
+					esc = _esc_fast(cell, c) if r >= lo else _escapes(Vector3i(c, r, e))
+					_s_esc[cell] = esc
+				val = r * 100.0 + 50.0 - (3 - esc) * 60.0 + along * absi(c - col_w)
+			2:
+				val = r * 100.0 + 20.0 + along * absi(c - col_w)
 			_:
-				val = height * 100.0 - DEAD_END
-		cands.append([val - float(dist[u]), u, kind])
+				val = r * 100.0 - DEAD_END
+		vals[k] = val - dist[id]
+		kinds[k] = kind
+	# The best 40 or so, best first.
+	var sorted := vals.duplicate()
+	sorted.sort()
+	var cut: float = sorted[maxi(0, nr - 40)] if nr > 0 else 0.0
+	var cands: Array = []
+	for k in nr:
+		if vals[k] >= cut:
+			cands.append([vals[k], reached[k], kinds[k]])
 	cands.sort_custom(func(a, b): return a[0] > b[0])
 	# Try them best first; skip any whose route would cross itself. A closed
 	# hatch or open cell where the water couldn't climb two more rows - through
@@ -505,8 +763,8 @@ func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Diction
 	# pocket: it counts as a dead end. (That only ever lowers a value, so stop
 	# once nothing further down the list can beat the best so far.)
 	var cells: Array = []
-	var best_u := start
-	var best_kind := "dead"
+	var best_end := Vector2i(sc, sr)
+	var best_kind := 3
 	var best_val := -INF
 	var tried := 0
 	for cand in cands:
@@ -515,30 +773,33 @@ func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Diction
 		tried += 1
 		var path: Array = []
 		var seen := {}
-		var end: Vector4i = cand[1]
-		var u: Vector4i = end
+		var end_id: int = cand[1]
+		var u := end_id
 		var ok := true
 		while u != start:
-			var pr: Array = prev[u]
-			var from: Vector4i = pr[0]
-			var cv := Vector2i(from.x, from.y)
+			var from: int = prev_id[u]
+			var ft := from / WD
+			var fcell := ft / 4
+			var cv := Vector2i(fcell % SW - 1, fcell / SW - 1 + lo)
 			if seen.has(cv):
 				ok = false
 				break
 			seen[cv] = true
-			path.push_front({"v": cv, "en": from.z, "ex": pr[1], "need": pr[2]})
+			path.push_front({"v": cv, "en": ft % 4, "ex": int(prev_ex[u]), "need": prev_need[u]})
 			u = from
 		if not ok:
 			continue
 		var val: float = cand[0]
-		var kind: String = cand[2]
-		if (kind == "hidden" or kind == "stuck") and not _can_climb(Vector2i(end.x, end.y), 2, int(w["row"]), seen):
-			kind = "dead"
-			val = end.y * 100.0 - DEAD_END - float(dist[end])
+		var kind: int = cand[2]
+		var ecell := (end_id / WD) / 4
+		var end := Vector2i(ecell % SW - 1, ecell / SW - 1 + lo)
+		if (kind == 1 or kind == 2) and not _climbs(end, 2, int(w["row"]), seen):
+			kind = 3
+			val = end.y * 100.0 - DEAD_END - dist[end_id]
 		if val > best_val:
 			best_val = val
 			cells = path
-			best_u = end
+			best_end = end
 			best_kind = kind
 	# When does the water reach each cell?
 	var sp := _speed()
@@ -552,8 +813,81 @@ func _search(w: Dictionary, lo: int, hi: int, have: Dictionary, penalty: Diction
 		else:
 			var tt: Tile = game.grid.get_tile(cell["v"].x, cell["v"].y)
 			t += Tuning.BASE_SEGMENT_TIME * Flow.time_factor(tt) / sp
-	return {"cells": cells, "end": Vector2i(best_u.x, best_u.y), "kind": best_kind, "needs": needs,
-			"missing": 0, "arrive_end": t, "start_ok": not cells.is_empty() or best_kind == "open"}
+	return {"cells": cells, "end": best_end, "kind": KINDS[best_kind], "needs": needs,
+			"missing": 0, "arrive_end": t, "start_ok": not cells.is_empty() or best_kind == 0}
+
+
+## End kind of a state (see _end_kind), cached per cell and entry side,
+## worked out from the snapshot (rows lo..hi; the rare cell below them asks
+## the grid).
+func _cell_kind(cell: int, c: int, r: int, e: int, hi: int) -> int:
+	var k: int = _s_kind[cell * 4 + e]
+	if k != 255:
+		return k
+	if c < 0 or c >= Tuning.COLS:
+		k = 3
+	elif r > hi:
+		k = 0
+	elif r < _s_lo:
+		k = KINDS.find(_end_kind(Vector3i(c, r, e), hi))
+	else:
+		match _s_cls[cell]:
+			1:
+				k = 1
+			2:
+				k = 2 if _way_on(cell, c, e) else 3
+			_:
+				k = 3
+	_s_kind[cell * 4 + e] = k
+	return k
+
+
+## _has_way_on from the snapshot.
+func _way_on(cell: int, c: int, e: int) -> bool:
+	for d in 4:
+		if d == e:
+			continue
+		if (d == P.E and c + 1 >= Tuning.COLS) or (d == P.W and c - 1 < 0):
+			continue
+		var nc: int = cell + DOFF[d]
+		var cls: int = _s_cls[nc]
+		if cls == 1 or cls == 2:
+			return true
+		if cls == 3:
+			var od: int = OPP[d]
+			var ow: int = _s_ow[nc]
+			if EXIT[_s_pc[nc] * 4 + od] >= 0 and (ow < 0 or ow == od):
+				return true
+	return false
+
+
+## _escapes from the snapshot (rows lo..hi).
+func _esc_fast(cell: int, c: int) -> int:
+	var n := 0
+	for d in [P.N, P.E, P.W]:
+		if (d == P.E and c + 1 >= Tuning.COLS) or (d == P.W and c - 1 < 0):
+			continue
+		var cls: int = _s_cls[cell + DOFF[d]]
+		if cls <= 2:
+			n += 1
+	return n
+
+
+## _row_span from the snapshot (row index ry, rows lo..hi).
+func _span_fast(ry: int, a: int) -> int:
+	var best := 0
+	var base := ry * SW + 1
+	for step in [-1, 1]:
+		var n := 0
+		var c: int = a + step
+		while c >= 0 and c < Tuning.COLS:
+			var cls: int = _s_cls[base + c]
+			if cls == 0 or cls == 4 or (cls == 3 and _s_pc[base + c] != P.H and _s_pc[base + c] != P.CROSS):
+				break
+			n += 1
+			c += step
+		best = maxi(best, n)
+	return best
 
 
 ## How many ways on (N, E, W) cell u might have, judging by what's known.
@@ -587,6 +921,46 @@ func _row_span(r: int, a: int) -> int:
 			c += step
 		best = maxi(best, n)
 	return best
+
+
+## _can_climb on the snapshot (cells below the snapshot count as blocked).
+func _climbs(v: Vector2i, rows_up: int, water_row: int, route: Dictionary) -> bool:
+	var goal: int = mini(v.y + rows_up, _s_hi + 1)
+	var lo_ok: int = maxi(water_row, _s_lo)
+	var seen := PackedByteArray()
+	seen.resize(_s_rows * SW)
+	for cv in route:
+		var rc: Vector2i = cv
+		if rc.y >= _s_lo and rc.y <= _s_hi:
+			seen[(rc.y - _s_lo + 1) * SW + rc.x + 1] = 1
+	var start := (v.y - _s_lo + 1) * SW + v.x + 1
+	if start < 0 or start >= seen.size():
+		return _can_climb(v, rows_up, water_row, route)
+	seen[start] = 1
+	var todo := PackedInt32Array([start])
+	while not todo.is_empty():
+		var cell: int = todo[todo.size() - 1]
+		todo.resize(todo.size() - 1)
+		var r := cell / SW - 1 + _s_lo
+		if r >= goal:
+			return true
+		var cx := cell % SW
+		for d in 4:
+			var ncx := cx + (1 if d == P.E else (-1 if d == P.W else 0))
+			if ncx < 1 or ncx > Tuning.COLS:
+				continue
+			var nr := r + (1 if d == P.N else (-1 if d == P.S else 0))
+			if nr < lo_ok:
+				continue
+			if nr > _s_hi:
+				return true
+			var ncell := (nr - _s_lo + 1) * SW + ncx
+			if seen[ncell] == 1:
+				continue
+			seen[ncell] = 1
+			if _s_open[ncell] == 1:
+				todo.append(ncell)
+	return false
 
 
 ## Is there any way up from cell v - at least `rows_up` rows, or off the top

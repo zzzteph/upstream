@@ -196,6 +196,21 @@ static func sprite_for(t: Tile) -> int:
 	return (FULL if full[0] else EMPTY) + p
 
 
+## The sprite of tile t's pipe with no water in it (-1 if it has none).
+static func dry_sprite_for(t: Tile) -> int:
+	if t.hidden or t.kind != Tile.EMPTY or t.piece < 0:
+		return -1
+	var p := t.piece
+	if t.narrow:
+		return NARROW + p
+	match t.special:
+		Tile.SP_RESERVOIR:
+			return RES + (0 if p == Pieces.V else 1)
+		Tile.SP_ONEWAY:
+			return ONEWAY + p * 2 + maxi(0, (Pieces.OPENINGS[p] as Array).find(t.oneway_entry))
+	return EMPTY + p
+
+
 static var _shapes: Array = []
 
 

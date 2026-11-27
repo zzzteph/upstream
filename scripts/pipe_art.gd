@@ -229,6 +229,26 @@ static func draw_pipe(ci: CanvasItem, center: Vector2, T: float, piece: int, pal
 					stroke(ci, center, T, en, ex, W_BULGE_GOO * T * 0.25, fade(tile.fill_color[ch].lightened(0.6), 0.85 * alpha), BULGE_T0, t1, W_BULGE_GOO * T * 0.22)
 
 
+## Just the water in a tile's pipe (what draw_pipe adds over the dry pipe):
+## the live tile stamps the dry pipe's sprite and draws only this on top.
+static func draw_water(ci: CanvasItem, center: Vector2, T: float, tile: Tile, time := 0.0) -> void:
+	var piece := tile.piece
+	var k := NARROW_SCALE if tile.narrow else 1.0
+	var reservoir := tile.special == Tile.SP_RESERVOIR
+	var chans := Pieces.channels(piece)
+	for i in chans.size():
+		var ch := i if piece == Pieces.CROSS else 0
+		if tile.fill_entry[ch] < 0:
+			continue
+		var en: int = tile.fill_entry[ch]
+		var ex := Pieces.exit_dir(piece, en)
+		goo(ci, center, T, en, ex, tile.fill[ch], tile.fill_color[ch], 1.0, time, tile.rnd + i * 37, false, k)
+		if reservoir and tile.fill[ch] > BULGE_T0:
+			var t1 := minf(tile.fill[ch], 1.0 - BULGE_T0)
+			stroke(ci, center, T, en, ex, W_BULGE_GOO * T, tile.fill_color[ch], BULGE_T0, t1)
+			stroke(ci, center, T, en, ex, W_BULGE_GOO * T * 0.25, fade(tile.fill_color[ch].lightened(0.6), 0.85), BULGE_T0, t1, W_BULGE_GOO * T * 0.22)
+
+
 ## Goo inside a channel, from the entry side up to progress p.
 static func goo(ci: CanvasItem, center: Vector2, T: float, en: int, ex: int, p: float, col: Color,
 		alpha := 1.0, time := 0.0, rnd := 0, bubbles := true, w_scale := 1.0) -> void:

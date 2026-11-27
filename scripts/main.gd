@@ -102,6 +102,14 @@ var kb_active := false
 var debug_fps := false
 var debug_autoplay := false
 var debug_powers := false   ## ?powers: start each run with 3 Flow-freezes and 3 Reveals.
+## Quality, so play stays smooth on any phone: 0 = everything; 1 = no
+## decorative motion (background bubbles and decorations, bubbles in pipes,
+## particle glow); 2 = also a lower-resolution board. It steps down by itself
+## when frames are slow for a few seconds while playing (never back up), and
+## starts at 1 on low-memory phones. ?quality=N sets it.
+var quality := 0
+var _frame_avg := 0.0
+var _slow_for := 0.0
 var _fps_timer := 0.0
 
 
@@ -288,6 +296,7 @@ func _random_piece() -> int:
 # --- frame update --------------------------------------------------------------------
 
 func _process(dt: float) -> void:
+	_govern(dt)
 	dt = minf(dt, 0.05)
 	time += dt
 	_compute_layout()
@@ -318,6 +327,28 @@ func _process(dt: float) -> void:
 	ui.refresh()
 
 
+## Step quality down when frames are slow (under ~45 a second) for 3 seconds
+## of play. Pauses, the menu and one-off hitches (a frame over 0.25 s, such
+## as coming back to the tab) don't count.
+func _govern(dt: float) -> void:
+	if quality >= 2 or paused or (state != State.COUNTDOWN and state != State.RUNNING) or dt > 0.25:
+		_slow_for = 0.0
+		return
+	_frame_avg = lerpf(_frame_avg if _frame_avg > 0.0 else dt, dt, 0.05)
+	if _frame_avg > 1.0 / 45.0:
+		_slow_for += dt
+		if _slow_for >= 3.0:
+			set_quality(quality + 1)
+	else:
+		_slow_for = 0.0
+
+
+func set_quality(q: int) -> void:
+	quality = clampi(q, 0, 2)
+	_slow_for = 0.0
+	_frame_avg = 0.0
+
+
 func _update_play(dt: float) -> void:
 	play_time += dt
 	lock_timer = maxf(0.0, lock_timer - dt)
@@ -337,7 +368,7 @@ func _update_play(dt: float) -> void:
 		return
 	if freeze_timer > 0.0:
 		freeze_timer -= dt
-		if randf() < 0.6:
+		if randf() < dt * 36.0:  # About 36 flakes a second, whatever the frame rate.
 			renderer.snow(1)
 		if freeze_timer <= 0.0:
 			freeze_timer = 0.0
@@ -353,7 +384,7 @@ func _update_play(dt: float) -> void:
 
 func _update_spill(dt: float) -> void:
 	spill_timer -= dt
-	if randf() < 0.5:
+	if randf() < dt * 30.0:
 		renderer.burst(spill["p"], spill["col"], 2, 2.2, 0.06, 0.8, 9.0)
 	if spill_timer <= 0.0:
 		state = State.GAMEOVER
@@ -837,7 +868,8 @@ func _compute_layout() -> void:
 		var phys := Vector2(win.size) if win != null and win.size.x > 0 else view_size
 		if phys.x < view_size.x * 0.5:
 			phys = view_size  # Headless / not-yet-sized window: use the virtual size.
-		var k := minf(1.0, Tuning.PS1_SHORT_SIDE / minf(phys.x, phys.y))
+		var side := Tuning.PS1_SHORT_SIDE * (0.75 if quality >= 2 else 1.0)
+		var k := minf(1.0, side / minf(phys.x, phys.y))
 		var target := Vector2i(maxi(16, roundi(phys.x * k)), maxi(16, roundi(phys.y * k)))
 		if world_vp.size != target:
 			world_vp.size = target
@@ -959,6 +991,14 @@ func _read_debug_flags() -> void:
 	debug_fps = qs.contains("fps")
 	debug_autoplay = qs.contains("autoplay")
 	debug_powers = qs.contains("powers")
+	var qi := qs.find("quality=")
+	if qi >= 0:
+		set_quality(int(qs.substr(qi + 8, 1)))
+	elif OS.has_feature("web"):
+		# Low-memory phones (Chrome reports up to 8 GB, rounded down) start lighter.
+		var mem = JavaScriptBridge.eval("navigator.deviceMemory || 0", true)
+		if mem != null and float(str(mem)) > 0.0 and float(str(mem)) <= 2.0:
+			set_quality(1)
 
 
 ## Autoplay: a perfect player that lays the guaranteed path just ahead of the goo.

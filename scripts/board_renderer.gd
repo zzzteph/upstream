@@ -35,6 +35,8 @@ var glow: Layer
 var fx_sprites: Layer
 var frost: Layer
 var fx: Layer
+var backdrop: Layer
+var live_base: Layer   ## The live tile's dry pipe, as an atlas sprite (under `live`).
 var queue_bg: Layer
 var queue_icons: Layer
 var queue_fg: Layer
@@ -44,7 +46,29 @@ var _pool: Array = []
 var _animate_until := {}  ## row -> game time until which it redraws every frame
 var _layout_key := ""
 var _queue_sig := ""
-var parts: Array = []   ## {p, v, life, max, col, size, grav, glow}
+## Particles, as parallel packed arrays (far cheaper per frame than a
+## Dictionary each): position and velocity in world units, life left and at
+## the start, size, gravity, colour, and whether it glows.
+var _pp := PackedVector2Array()
+var _pv := PackedVector2Array()
+var _pl := PackedFloat32Array()
+var _pm := PackedFloat32Array()
+var _ps := PackedFloat32Array()
+var _pg := PackedFloat32Array()
+var _pc := PackedColorArray()
+var _pw := PackedByteArray()
+const MAX_PARTS := 300
+## Bubbles drifting along full pipes, worked out once per row version:
+## row -> [version, PackedFloat32Array of BUB_STRIDE floats per bubble].
+var _bub_cache := {}
+const BUB_STRIDE := 11
+## Random numbers for the backdrop and the side glasses (a table, so nothing
+## calls sin() just to get a random number every frame).
+var _rt := PackedFloat32Array()
+## The frost is drawn once and then only moved and faded (see _sync_frost).
+var _frost_key := ""
+var _frost_cam := 0.0
+var _frost_off := Vector2.ZERO
 ## The background shows how fast the water runs: bubbles and current streaks
 ## rise at a pace that follows the water's speed (faster with height, rushing
 ## while held, still while frozen). flow_motion eases towards that pace;
@@ -57,11 +81,17 @@ var _sb := StyleBoxFlat.new()
 
 func _ready() -> void:
 	_sb.anti_aliasing = true
+	_rt.resize(1024)
+	for i in 1024:
+		_rt[i] = h01(i * 1.618 + 0.37)
 	var add_mat := CanvasItemMaterial.new()
 	add_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	backdrop = _layer(_draw_backdrop, -100)
 	rows_root = Node2D.new()
 	rows_root.material = atlas.premult_material
 	add_child(rows_root)
+	live_base = _layer(_draw_live_base, 139)
+	live_base.material = atlas.premult_material
 	live = _layer(_draw_live, 140)
 	glow = _layer(_draw_glow, 150)
 	glow.material = add_mat
@@ -88,11 +118,12 @@ func _layer(cb: Callable, z: int, parent: Node = null) -> Layer:
 
 func redraw() -> void:
 	_sync_rows()
-	queue_redraw()
+	backdrop.queue_redraw()
+	live_base.queue_redraw()
 	live.queue_redraw()
 	glow.queue_redraw()
 	fx_sprites.queue_redraw()
-	frost.queue_redraw()
+	_sync_frost()
 	fx.queue_redraw()
 	text_layer.queue_redraw()
 	var sig := _queue_signature()
@@ -115,8 +146,27 @@ func animate_row(r: int, until: float) -> void:
 
 
 func clear_fx() -> void:
-	parts.clear()
+	for a in [_pp, _pv, _pl, _pm, _ps, _pg, _pc, _pw]:
+		a.clear()
 	texts.clear()
+	_bub_cache.clear()
+
+
+func part_count() -> int:
+	return _pp.size()
+
+
+func _add_part(p: Vector2, v: Vector2, life: float, mx: float, col: Color, size: float, grav: float, glowing: bool) -> void:
+	if _pp.size() >= MAX_PARTS:
+		return
+	_pp.append(p)
+	_pv.append(v)
+	_pl.append(life)
+	_pm.append(mx)
+	_ps.append(size)
+	_pg.append(grav)
+	_pc.append(col)
+	_pw.append(1 if glowing else 0)
 
 
 # --- coordinates ---------------------------------------------------------------
@@ -312,8 +362,27 @@ func _draw_live(ci: CanvasItem) -> void:
 	if game.flow.active:
 		var t := grid.get_tile(game.flow.col, game.flow.row)
 		if t != null and t.kind == Tile.EMPTY and t.piece >= 0:
-			var pal := Zones.theme_for_row(game.flow.row)
-			PipeArt.draw_pipe(ci, tile_rect(game.flow.col, game.flow.row).get_center(), T, t.piece, pal, t, 1.0, game.time, false)
+			var center := tile_rect(game.flow.col, game.flow.row).get_center()
+			if SpriteAtlas.dry_sprite_for(t) >= 0 and atlas.tile_px > 0:
+				# The pipe itself comes from the atlas (live_base); only the water is drawn.
+				PipeArt.draw_water(ci, center, T, t, game.time)
+			else:
+				PipeArt.draw_pipe(ci, center, T, t.piece, Zones.theme_for_row(game.flow.row), t, 1.0, game.time, false)
+
+
+## The live tile's dry pipe, stamped from the atlas (much cheaper than drawing
+## the pipe's metal as vectors every frame).
+func _draw_live_base(ci: CanvasItem) -> void:
+	if game == null or game.T <= 0.0 or atlas.tile_px <= 0 or not game.flow.active:
+		return
+	var t: Tile = game.grid.get_tile(game.flow.col, game.flow.row)
+	if t == null:
+		return
+	var s := SpriteAtlas.dry_sprite_for(t)
+	if s < 0:
+		return
+	var tex := atlas.tile_tex(Zones.index_for_row(game.flow.row))
+	ci.draw_texture_rect_region(tex, tile_rect(game.flow.col, game.flow.row), atlas.region(s))
 
 
 # --- glow (additive) ---------------------------------------------------------------
@@ -328,11 +397,21 @@ func _draw_glow(ci: CanvasItem) -> void:
 		var gc: Color = Zones.theme_for_row(game.flow.row)["goo"]
 		var r := T * 0.9 * pulse
 		ci.draw_texture_rect(atlas.soft, Rect2(hp - Vector2(r, r), Vector2(r, r) * 2.0), false, PipeArt.fade(gc, 0.45))
-	for p in parts:
-		if p["glow"]:
-			var a: float = clampf(p["life"] / p["max"], 0.0, 1.0)
-			var r: float = p["size"] * T * 3.0
-			ci.draw_texture_rect(atlas.soft, Rect2(w2s(p["p"]) - Vector2(r, r), Vector2(r, r) * 2.0), false, PipeArt.fade(p["col"], 0.4 * a))
+	if game.quality >= 1:
+		return  # Lighter mode: no particle glow.
+	var b: Rect2 = game.board_rect
+	var off := shake_offset()
+	var ox: float = b.position.x + off.x
+	var oy: float = b.end.y + game.cam.y * T + off.y
+	for i in _pp.size():
+		if _pw[i] == 0:
+			continue
+		var a: float = clampf(_pl[i] / _pm[i], 0.0, 1.0)
+		var r: float = _ps[i] * T * 3.0
+		var c: Color = _pc[i]
+		c.a *= 0.4 * a
+		var p: Vector2 = _pp[i]
+		ci.draw_texture_rect(atlas.soft, Rect2(ox + p.x * T - r, oy - p.y * T - r, r * 2.0, r * 2.0), false, c)
 
 
 # --- particles ---------------------------------------------------------------------
@@ -341,10 +420,8 @@ func burst(world_pos: Vector2, col: Color, count: int, speed := 3.0, size := 0.0
 	for i in count:
 		var a := randf() * TAU
 		var s := speed * (0.35 + randf() * 0.65)
-		parts.append({"p": world_pos, "v": Vector2(cos(a), sin(a)) * s + Vector2(0, speed * 0.3), "life": life * (0.6 + randf() * 0.4),
-				"max": life, "col": col, "size": size * (0.6 + randf() * 0.8), "grav": grav, "glow": glowing})
-	if parts.size() > 400:
-		parts = parts.slice(parts.size() - 400)
+		_add_part(world_pos, Vector2(cos(a), sin(a)) * s + Vector2(0, speed * 0.3), life * (0.6 + randf() * 0.4),
+				life, col, size * (0.6 + randf() * 0.8), grav, glowing)
 
 
 func float_text(world_pos: Vector2, text: String, col: Color, size := 0.34, life := 1.1) -> void:
@@ -356,9 +433,9 @@ func snow(count: int) -> void:
 	var cam: GameCamera = game.cam
 	for i in count:
 		var life := 1.6 + randf() * 1.2
-		parts.append({"p": Vector2(randf() * Tuning.COLS, cam.y + cam.visible_rows * randf()),
-				"v": Vector2(randf_range(-0.25, 0.25), -0.5 - randf() * 0.4), "life": life, "max": life,
-				"col": Color(0.92, 0.98, 1.0, 0.95), "size": 0.03 + randf() * 0.03, "grav": 0.0, "glow": false})
+		_add_part(Vector2(randf() * Tuning.COLS, cam.y + cam.visible_rows * randf()),
+				Vector2(randf_range(-0.25, 0.25), -0.5 - randf() * 0.4), life, life,
+				Color(0.92, 0.98, 1.0, 0.95), 0.03 + randf() * 0.03, 0.0, false)
 
 
 ## Water dripping off the pipes as the freeze ends.
@@ -384,11 +461,28 @@ func update_fx(dt: float) -> void:
 	target = pow(target, 0.7)
 	flow_motion = lerpf(flow_motion, target, 1.0 - exp(-dt * (6.0 if target < flow_motion else 3.0)))
 	flow_clock += dt * flow_motion
-	for p in parts:
-		p["v"].y -= p["grav"] * dt
-		p["p"] += p["v"] * dt
-		p["life"] -= dt
-	parts = parts.filter(func(p): return p["life"] > 0.0)
+	# Particles: move, age, and drop the dead ones in place.
+	var n := _pp.size()
+	var j := 0
+	for i in n:
+		var l: float = _pl[i] - dt
+		if l <= 0.0:
+			continue
+		var v: Vector2 = _pv[i]
+		v.y -= _pg[i] * dt
+		_pv[j] = v
+		_pp[j] = _pp[i] + v * dt
+		_pl[j] = l
+		if j != i:
+			_pm[j] = _pm[i]
+			_ps[j] = _ps[i]
+			_pg[j] = _pg[i]
+			_pc[j] = _pc[i]
+			_pw[j] = _pw[i]
+		j += 1
+	if j < n:
+		for a in [_pp, _pv, _pl, _pm, _ps, _pg, _pc, _pw]:
+			a.resize(j)
 	for t in texts:
 		t["p"].y += dt * 0.7
 		t["life"] -= dt
@@ -426,26 +520,52 @@ func _hover_cells() -> Array:
 
 # --- Flow-freeze frost -----------------------------------------------------------------------
 
-func _draw_frost(ci: CanvasItem) -> void:
-	if game == null or game.T <= 0.0:
+## The frost only changes when the board does: draw it once (at full
+## strength) and then just move it with the camera and fade it with the
+## layer's alpha, instead of redrawing every iced pipe every frame.
+func _sync_frost() -> void:
+	var fa: float = game.freeze_amount() if game != null and game.T > 0.0 else 0.0
+	if fa <= 0.0:
+		if frost.visible:
+			frost.visible = false
+			_frost_key = ""
 		return
-	var a: float = game.freeze_amount()
-	if a <= 0.0:
+	frost.visible = true
+	frost.modulate.a = fa
+	var rr: Vector2i = game.cam.row_range()
+	var vsum := 0
+	for r in range(rr.x, rr.y + 1):
+		vsum += game.grid.version(r)
+	var key := "%d|%d|%d|%.3f|%.2f|%.2f" % [rr.x, rr.y, vsum, game.T, game.board_rect.position.x, game.board_rect.size.y]
+	var off := shake_offset()
+	if key != _frost_key:
+		_frost_key = key
+		_frost_cam = game.cam.y
+		_frost_off = off
+		frost.position = Vector2.ZERO
+		frost.queue_redraw()
+	else:
+		frost.position = Vector2(off.x - _frost_off.x, (game.cam.y - _frost_cam) * game.T + off.y - _frost_off.y)
+
+
+func _draw_frost(ci: CanvasItem) -> void:
+	if game == null or game.T <= 0.0 or game.freeze_timer <= 0.0:
 		return
 	var T: float = game.T
 	var b: Rect2 = game.board_rect
 	var grid: Grid = game.grid
 	var rr: Vector2i = game.cam.row_range()
 	var off := shake_offset()
-	# A cold tint over the whole board, and frost creeping in from the walls.
-	ci.draw_rect(Rect2(b.position.x - T * 0.2 + off.x, b.position.y, b.size.x + T * 0.4, b.size.y), Color(0.72, 0.9, 1.0, 0.24 * a))
+	# A cold tint over the whole board (taller than the board, as the layer
+	# moves with the camera), and frost creeping in from the walls.
+	ci.draw_rect(Rect2(b.position.x - T * 0.2 + off.x, b.position.y - T * 2.0, b.size.x + T * 0.4, b.size.y + T * 4.0), Color(0.72, 0.9, 1.0, 0.24))
 	for r in range(rr.x, rr.y + 1):
 		var y := row_y(r) + off.y
 		for x in [b.position.x + off.x, b.end.x + off.x]:
 			var fr := T * (0.7 + 0.25 * h01(r * 3.7 + x))
-			ci.draw_texture_rect(atlas.soft, Rect2(x - fr, y + T * 0.5 - fr, fr * 2.0, fr * 2.0), false, Color(0.88, 0.97, 1.0, 0.4 * a))
-	var ice := Color(0.9, 0.98, 1.0, 0.95 * a)
-	var sheen := Color(1, 1, 1, 0.8 * a)
+			ci.draw_texture_rect(atlas.soft, Rect2(x - fr, y + T * 0.5 - fr, fr * 2.0, fr * 2.0), false, Color(0.88, 0.97, 1.0, 0.4))
+	var ice := Color(0.9, 0.98, 1.0, 0.95)
+	var sheen := Color(1, 1, 1, 0.8)
 	for r in range(maxi(rr.x, grid.floor_row), rr.y + 1):
 		for c in Tuning.COLS:
 			var t := grid.get_tile(c, r)
@@ -470,12 +590,7 @@ func _draw_frost(ci: CanvasItem) -> void:
 				var hy := float((t.rnd >> (k * 7 + 13)) & 63) / 63.0 - 0.5
 				var fsz := T * (0.3 + 0.12 * k)
 				var fp := center + Vector2(hx, hy) * T * 0.62
-				ci.draw_texture_rect(atlas.flake, Rect2(fp - Vector2(fsz, fsz) * 0.5, Vector2(fsz, fsz)), false, Color(1, 1, 1, 0.85 * a))
-	# The freeze rings out from the water's leading edge.
-	var since: float = game.time - game.freeze_started
-	if since < 0.8:
-		var hp := w2s(game.flow.head_world())
-		ci.draw_arc(hp, since / 0.8 * T * 7.0, 0.0, TAU, 48, Color(0.92, 0.99, 1.0, (1.0 - since / 0.8) * 0.9), maxf(3.0, T * 0.09), PipeArt.aa)
+				ci.draw_texture_rect(atlas.flake, Rect2(fp - Vector2(fsz, fsz) * 0.5, Vector2(fsz, fsz)), false, Color(1, 1, 1, 0.85))
 
 
 # --- fx (bubbles, outlines, particles, text) -------------------------------------------
@@ -487,21 +602,75 @@ func _draw_fx(ci: CanvasItem) -> void:
 	var grid: Grid = game.grid
 	var rr: Vector2i = game.cam.row_range()
 	var time: float = game.time
+	if game.quality < 1:
+		_draw_pipe_bubbles(ci, T, grid, rr, time)
+	_draw_fx_rest(ci, T, time)
+
+
+func _draw_pipe_bubbles(ci: CanvasItem, T: float, grid: Grid, rr: Vector2i, time: float) -> void:
 	# Bubbles drifting along full pipes.
+	var br := PipeArt.W_GOO * T * 0.17
+	var sz := Vector2(br, br) * 2.0
+	var off := shake_offset()
+	var x0: float = game.board_rect.position.x + off.x
 	for r in range(maxi(rr.x, grid.floor_row), rr.y + 1):
-		for c in Tuning.COLS:
-			var t := grid.get_tile(c, r)
-			if t == null:
+		var list := _row_bubbles(grid, r)
+		var n := list.size()
+		if n == 0:
+			continue
+		var cy := row_y(r) + off.y + T * 0.5
+		var i := 0
+		while i < n:
+			var tt := fposmod(time * 0.55 + list[i + 6], 1.0)
+			var px: float
+			var py: float
+			if list[i + 1] < 0.5:
+				px = lerpf(list[i + 2], list[i + 4], tt)
+				py = lerpf(list[i + 3], list[i + 5], tt)
+			else:
+				var ang: float = list[i + 4] + list[i + 5] * tt
+				px = list[i + 2] + cos(ang) * 0.5
+				py = list[i + 3] + sin(ang) * 0.5
+			ci.draw_texture_rect(atlas.disk, Rect2(Vector2(x0 + (list[i] + 0.5 + px) * T - br, cy + py * T - br), sz), false,
+					Color(list[i + 7], list[i + 8], list[i + 9], list[i + 10]))
+			i += BUB_STRIDE
+
+
+## The bubbles of row r (see _bub_cache): column, path kind (0 straight from
+## a to b, 1 an arc: centre, start angle, sweep), phase, colour.
+func _row_bubbles(grid: Grid, r: int) -> PackedFloat32Array:
+	var ver := grid.version(r)
+	var e = _bub_cache.get(r)
+	if e != null and int(e[0]) == ver:
+		return e[1]
+	if _bub_cache.size() > 96:
+		_bub_cache.clear()
+	var out := PackedFloat32Array()
+	for c in Tuning.COLS:
+		var t := grid.get_tile(c, r)
+		if t == null or not t.has_goo() or t.special == Tile.SP_RESERVOIR or t.kind != Tile.EMPTY:
+			continue
+		for ch in 2:
+			if t.fill_entry[ch] < 0 or t.fill[ch] < 1.0:
 				continue
-			if t.has_goo() and t.special != Tile.SP_RESERVOIR and t.kind == Tile.EMPTY:
-				var center := tile_rect(c, r).get_center()
-				var br := PipeArt.W_GOO * T * 0.17
-				for ch in 2:
-					if t.fill_entry[ch] >= 0 and t.fill[ch] >= 1.0:
-						var en: int = t.fill_entry[ch]
-						var tt := fposmod(time * 0.55 + float((t.rnd + ch * 37) & 0xffff) / 997.0, 1.0)
-						var bp := center + Pieces.path_point(en, Pieces.exit_dir(t.piece, en), tt) * T
-						ci.draw_texture_rect(atlas.disk, Rect2(bp - Vector2(br, br), Vector2(br, br) * 2.0), false, PipeArt.fade(t.fill_color[ch].lightened(0.75), 0.75))
+			var en: int = t.fill_entry[ch]
+			var ex := Pieces.exit_dir(t.piece, en)
+			var a: Vector2 = Pieces.SIDE_MID[en]
+			var bb: Vector2 = Pieces.SIDE_MID[ex]
+			var col: Color = t.fill_color[ch].lightened(0.75)
+			var phase := float((t.rnd + ch * 37) & 0xffff) / 997.0
+			if ex == Pieces.opposite(en):
+				out.append_array([c, 0.0, a.x, a.y, bb.x, bb.y, phase, col.r, col.g, col.b, col.a * 0.75])
+			else:
+				var cc := a + bb
+				var a0 := (a - cc).angle()
+				var d := wrapf((bb - cc).angle() - a0, -PI, PI)
+				out.append_array([c, 1.0, cc.x, cc.y, a0, d, phase, col.r, col.g, col.b, col.a * 0.75])
+	_bub_cache[r] = [ver, out]
+	return out
+
+
+func _draw_fx_rest(ci: CanvasItem, T: float, time: float) -> void:
 	# Unlock mode: the picked-up pipe gets a bright pulsing frame.
 	if game.held_piece >= 0 and game.held_from.x >= 0:
 		var hr := tile_rect(game.held_from.x, game.held_from.y)
@@ -511,10 +680,23 @@ func _draw_fx(ci: CanvasItem) -> void:
 	_draw_hover(ci, T)
 	if game.state == game.State.SPILL or game.state == game.State.GAMEOVER:
 		_draw_spill(ci, T)
-	for p in parts:
-		var a: float = clampf(p["life"] / p["max"], 0.0, 1.0)
-		var r: float = p["size"] * T * (0.5 + 0.5 * a)
-		ci.draw_texture_rect(atlas.disk, Rect2(w2s(p["p"]) - Vector2(r, r), Vector2(r, r) * 2.0), false, PipeArt.fade(p["col"], a))
+	var b: Rect2 = game.board_rect
+	var off := shake_offset()
+	var ox: float = b.position.x + off.x
+	var oy: float = b.end.y + game.cam.y * T + off.y
+	for i in _pp.size():
+		var a: float = clampf(_pl[i] / _pm[i], 0.0, 1.0)
+		var r: float = _ps[i] * T * (0.5 + 0.5 * a)
+		var c: Color = _pc[i]
+		c.a *= a
+		var p: Vector2 = _pp[i]
+		ci.draw_texture_rect(atlas.disk, Rect2(ox + p.x * T - r, oy - p.y * T - r, r * 2.0, r * 2.0), false, c)
+	# The freeze rings out from the water's leading edge.
+	if game.freeze_timer > 0.0:
+		var since: float = game.time - game.freeze_started
+		if since < 0.8:
+			var hp := w2s(game.flow.head_world())
+			ci.draw_arc(hp, since / 0.8 * T * 7.0, 0.0, TAU, 48, Color(0.92, 0.99, 1.0, (1.0 - since / 0.8) * 0.9), maxf(3.0, T * 0.09), PipeArt.aa)
 
 
 
@@ -530,6 +712,8 @@ func _draw_sight_glasses(ci: CanvasItem, T: float) -> void:
 	var w := maxf(3.0, ww * 0.42)
 	var goo: Color = Zones.theme_for_row(game.height)["goo"]
 	var frozen: bool = game.freeze_timer > 0.0
+	if b.size.x <= 0.0:
+		return
 	var water := Color(0.8, 0.95, 1.0) if frozen else goo
 	var stretch := clampf((flow_motion - 1.6) / 5.0, 0.0, 1.0)
 	for side in 2:
@@ -539,10 +723,11 @@ func _draw_sight_glasses(ci: CanvasItem, T: float) -> void:
 		ci.draw_rect(glass.grow(-1.0), PipeArt.fade(water, 0.38))
 		ci.draw_rect(Rect2(glass.position.x + w * 0.18, glass.position.y, maxf(1.0, w * 0.16), glass.size.y), Color(1, 1, 1, 0.18))
 		var span := b.size.y + 40.0
-		for i in 14:
-			var k := i + side * 31
-			var y := b.end.y + 20.0 - fposmod(h01(k * 3.3) * span + flow_clock * T * (1.1 + h01(k * 1.9) * 0.9), span)
-			var r := w * (0.22 + 0.16 * h01(k * 7.1))
+		var fcT := flow_clock * T
+		for i in (9 if game.quality < 1 else 4):
+			var k := 600 + (i + side * 16) * 3
+			var y := b.end.y + 20.0 - fposmod(_rt[k] * span + fcT * (1.1 + _rt[k + 1] * 0.9), span)
+			var r := w * (0.22 + 0.16 * _rt[k + 2])
 			var l := r * 2.0 * (1.0 + stretch * 4.0)
 			ci.draw_texture_rect(atlas.disk, Rect2(Vector2(x - r, y - l * 0.5), Vector2(r * 2.0, l)), false, Color(1, 1, 1, 0.75))
 
@@ -614,49 +799,77 @@ func _mix(a: Dictionary, b: Dictionary, key: String, t: float) -> Color:
 	return (a[key] as Color).lerp(b[key], t)
 
 
-func _draw() -> void:
+func _draw_backdrop(ci: CanvasItem) -> void:
 	if game == null or game.T <= 0.0:
 		return
 	var vp := _view_palette()
 	var vs: Vector2 = game.view_size
 	var top := _mix(vp[0], vp[1], "bg_top", vp[2])
 	var bottom := _mix(vp[0], vp[1], "bg_bottom", vp[2])
-	draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(vs.x, 0), vs, Vector2(0, vs.y)]),
+	ci.draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(vs.x, 0), vs, Vector2(0, vs.y)]),
 			PackedColorArray([top, top, bottom, bottom]))
+	# Only the strips beside the board (and the panel) show: skip what's behind them.
+	var b: Rect2 = game.board_rect
+	_hide_a = Vector2(b.position.x - game.T * 0.3, b.end.x + game.T * 0.3)
+	var q: Rect2 = game.queue_rect
+	_hide_b = Vector2(q.position.x, q.end.x) if not game.portrait else Vector2(-1.0, -1.0)
+	if game.quality >= 1:
+		return  # Lighter mode: just the gradient.
 	if vp[2] < 1.0:
-		_deco(vp[0], 1.0 - vp[2])
-	_deco(vp[1], vp[2])
-	_draw_current(_mix(vp[0], vp[1], "accent", vp[2]))
+		_deco(ci, vp[0], 1.0 - vp[2])
+	_deco(ci, vp[1], vp[2])
+	if game.quality >= 1:
+		return  # Lighter mode: just the gradient.
+	_draw_current(ci, _mix(vp[0], vp[1], "accent", vp[2]))
 
 
 ## The current: bubbles rising through the background at the water's pace,
 ## stretching into streaks when it runs fast, with faint flow lines.
-func _draw_current(acc: Color) -> void:
+func _draw_current(ci: CanvasItem, acc: Color) -> void:
 	var vs: Vector2 = game.view_size
 	var fc := flow_clock
 	var stretch := clampf((flow_motion - 1.6) / 5.0, 0.0, 1.0)
 	var span := vs.y + 120.0
 	if stretch > 0.0:
-		for i in 10:
-			var x := h01(i * 8.1) * vs.x
-			var y := vs.y + 60.0 - fposmod(h01(i * 2.9) * span + fc * (160.0 + h01(i) * 120.0), span)
-			var l := 60.0 + 140.0 * stretch
-			draw_rect(Rect2(x, y - l, 2.0, l), PipeArt.fade(acc, 0.1 * stretch))
+		var lc := PipeArt.fade(acc, 0.1 * stretch)
+		var l := 60.0 + 140.0 * stretch
+		for i in 8:
+			var k := i * 3
+			var x := _rt[k] * vs.x
+			if _behind(x):
+				continue
+			var y := vs.y + 60.0 - fposmod(_rt[k + 1] * span + fc * (160.0 + _rt[k + 2] * 120.0), span)
+			ci.draw_rect(Rect2(x, y - l, 2.0, l), lc)
 	var white := Color.WHITE.lerp(acc, 0.4)
-	for i in 30:
-		var x := h01(i * 2.7) * vs.x + sin(game.time * 0.9 + i * 1.3) * 5.0 * (1.0 - stretch)
-		var y := vs.y + 60.0 - fposmod(h01(i * 5.9) * span + fc * (40.0 + h01(i * 1.3) * 60.0), span)
-		var r := 2.5 + h01(i * 4.4) * 5.5
+	var tex: Texture2D = atlas.ring if stretch < 0.3 else atlas.disk
+	var base_a := 0.3 if stretch < 0.3 else 0.22
+	var wob := 5.0 * (1.0 - stretch)
+	var t: float = game.time
+	for i in 20:
+		var k := 40 + i * 5
+		var x := _rt[k] * vs.x
+		if _behind(x):
+			continue
+		x += sin(t * 0.9 + i * 1.3) * wob
+		var y := vs.y + 60.0 - fposmod(_rt[k + 1] * span + fc * (40.0 + _rt[k + 2] * 60.0), span)
+		var r := 2.5 + _rt[k + 3] * 5.5
 		var l := r * 2.0 * (1.0 + stretch * 5.0)
-		draw_texture_rect(atlas.ring if stretch < 0.3 else atlas.disk, Rect2(x - r, y - l * 0.5, r * 2.0, l), false,
-				PipeArt.fade(white, (0.3 if stretch < 0.3 else 0.22) * (0.6 + 0.4 * h01(i * 9.3))))
+		ci.draw_texture_rect(tex, Rect2(x - r, y - l * 0.5, r * 2.0, l), false, PipeArt.fade(white, base_a * (0.6 + 0.4 * _rt[k + 4])))
 
 
-func _dot(tex: Texture2D, p: Vector2, r: float, col: Color) -> void:
-	draw_texture_rect(tex, Rect2(p - Vector2(r, r), Vector2(r, r) * 2.0), false, col)
+var _hide_a := Vector2(-1, -1)
+var _hide_b := Vector2(-1, -1)
 
 
-func _deco(pal: Dictionary, alpha: float) -> void:
+func _behind(x: float) -> bool:
+	return (x > _hide_a.x and x < _hide_a.y) or (x > _hide_b.x and x < _hide_b.y)
+
+
+func _dot(ci: CanvasItem, tex: Texture2D, p: Vector2, r: float, col: Color) -> void:
+	ci.draw_texture_rect(tex, Rect2(p - Vector2(r, r), Vector2(r, r) * 2.0), false, col)
+
+
+func _deco(ci: CanvasItem, pal: Dictionary, alpha: float) -> void:
 	if alpha <= 0.01:
 		return
 	var vs: Vector2 = game.view_size
@@ -667,13 +880,19 @@ func _deco(pal: Dictionary, alpha: float) -> void:
 	var acc: Color = pal["accent"]
 	match pal["deco"]:
 		"bubbles":
-			for i in 24:
-				var x := h01(i * 3.1) * vs.x + sin(t + i) * 6.0
-				var sp := 18.0 + h01(i * 1.7) * 40.0
-				var y := vs.y - fposmod(h01(i * 7.7) * vs.y + fc * sp + scroll * 0.3, vs.y + 60.0) + 30.0
-				var r := 4.0 + h01(i * 5.3) * 10.0
-				_dot(atlas.ring, Vector2(x, y), r, PipeArt.fade(acc, 0.3 * alpha))
-				_dot(atlas.disk, Vector2(x - r * 0.35, y - r * 0.35), r * 0.25, PipeArt.fade(Color.WHITE, 0.18 * alpha))
+			var rc := PipeArt.fade(acc, 0.3 * alpha)
+			var hc := PipeArt.fade(Color.WHITE, 0.18 * alpha)
+			for i in 18:
+				var k := 200 + i * 4
+				var x := _rt[k] * vs.x
+				if _behind(x):
+					continue
+				x += sin(t + i) * 6.0
+				var sp := 18.0 + _rt[k + 1] * 40.0
+				var y := vs.y - fposmod(_rt[k + 2] * vs.y + fc * sp + scroll * 0.3, vs.y + 60.0) + 30.0
+				var r := 4.0 + _rt[k + 3] * 10.0
+				_dot(ci, atlas.ring, Vector2(x, y), r, rc)
+				_dot(ci, atlas.disk, Vector2(x - r * 0.35, y - r * 0.35), r * 0.25, hc)
 		"gears":
 			for i in 8:
 				var left := i % 2 == 0
@@ -681,38 +900,46 @@ func _deco(pal: Dictionary, alpha: float) -> void:
 				var x := gx if left else vs.x - gx
 				var y := fposmod(h01(i * 4.1) * (vs.y + 300.0) + scroll * 0.4, vs.y + 300.0) - 150.0
 				var r := 40.0 + h01(i * 9.1) * 60.0
-				draw_set_transform(Vector2(x, y), fc * (0.4 if left else -0.4) * (1.5 - h01(i)), Vector2.ONE)
-				draw_texture_rect(atlas.gear, Rect2(-r, -r, r * 2.0, r * 2.0), false, PipeArt.fade(pal["wall"].darkened(0.2), 0.55 * alpha))
-			draw_set_transform(Vector2.ZERO)
+				ci.draw_set_transform(Vector2(x, y), fc * (0.4 if left else -0.4) * (1.5 - h01(i)), Vector2.ONE)
+				ci.draw_texture_rect(atlas.gear, Rect2(-r, -r, r * 2.0, r * 2.0), false, PipeArt.fade(pal["wall"].darkened(0.2), 0.55 * alpha))
+			ci.draw_set_transform(Vector2.ZERO)
 		"grid":
 			var col := PipeArt.fade(acc, 0.16 * alpha)
 			var gap := 48.0
 			var y := vs.y + fposmod(scroll * 0.5, gap)
 			while y > -gap:
-				draw_rect(Rect2(0, y - 1.0, vs.x, 2.0), col)
+				ci.draw_rect(Rect2(0, y - 1.0, vs.x, 2.0), col)
 				y -= gap
 			var x := fposmod(vs.x * 0.5, gap)
 			while x < vs.x:
-				draw_rect(Rect2(x - 1.0, 0, 2.0, vs.y), col)
+				ci.draw_rect(Rect2(x - 1.0, 0, 2.0, vs.y), col)
 				x += gap
 			for i in 6:
 				var sx := h01(i * 6.6) * vs.x
 				var sy := fposmod(h01(i * 3.3) * vs.y + scroll * 0.5 + fc * 30.0, vs.y)
-				draw_rect(Rect2(sx, vs.y - sy, 3, 18), PipeArt.fade(pal["goo"], 0.4 * alpha))
+				ci.draw_rect(Rect2(sx, vs.y - sy, 3, 18), PipeArt.fade(pal["goo"], 0.4 * alpha))
 		"embers":
-			for i in 36:
-				var x := h01(i * 3.7) * vs.x + sin(t * 1.3 + i) * 10.0
-				var sp := 30.0 + h01(i * 1.9) * 60.0
-				var y := vs.y - fposmod(h01(i * 8.3) * vs.y + fc * sp + scroll * 0.35, vs.y + 20.0)
+			var hot := Color("ff4a1a")
+			for i in 24:
+				var k := 300 + i * 5
+				var x := _rt[k] * vs.x
+				if _behind(x):
+					continue
+				x += sin(t * 1.3 + i) * 10.0
+				var sp := 30.0 + _rt[k + 1] * 60.0
+				var y := vs.y - fposmod(_rt[k + 2] * vs.y + fc * sp + scroll * 0.35, vs.y + 20.0)
 				var fl := 0.5 + 0.5 * sin(t * 8.0 + i * 2.0)
-				_dot(atlas.soft, Vector2(x, y), 3.0 + h01(i * 2.9) * 5.0, PipeArt.fade(acc.lerp(Color("ff4a1a"), h01(i)), (0.45 + 0.5 * fl) * alpha))
+				_dot(ci, atlas.soft, Vector2(x, y), 3.0 + _rt[k + 3] * 5.0, PipeArt.fade(acc.lerp(hot, _rt[k + 4]), (0.45 + 0.5 * fl) * alpha))
 		"stars":
-			for i in 90:
-				var layer := 0.08 + h01(i * 1.3) * 0.25
-				var x := h01(i * 4.9) * vs.x
-				var y := fposmod(h01(i * 2.1) * vs.y + scroll * layer, vs.y)
-				var tw := 0.5 + 0.5 * sin(t * (1.0 + h01(i) * 3.0) + i)
-				_dot(atlas.disk, Vector2(x, y), 0.8 + layer * 5.0, PipeArt.fade(Color.WHITE.lerp(acc, h01(i * 7.0)), (0.3 + 0.6 * tw) * alpha))
+			for i in 60:
+				var k := 440 + i * 5
+				var x := _rt[k] * vs.x
+				if _behind(x):
+					continue
+				var layer := 0.08 + _rt[k + 1] * 0.25
+				var y := fposmod(_rt[k + 2] * vs.y + scroll * layer, vs.y)
+				var tw := 0.5 + 0.5 * sin(t * (1.0 + _rt[k + 3] * 3.0) + i)
+				_dot(ci, atlas.disk, Vector2(x, y), 0.8 + layer * 5.0, PipeArt.fade(Color.WHITE.lerp(acc, _rt[k + 4]), (0.3 + 0.6 * tw) * alpha))
 
 
 # --- queue panel ---------------------------------------------------------------------------

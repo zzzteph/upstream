@@ -248,6 +248,7 @@ var _toast_tween: Tween
 var _ff_lit := false
 var _scaled := []          ## [Label, base font size, base outline] scaled to the screen width.
 var _flash: ColorRect
+var _badge_key := ""
 var _flash_tween: Tween
 
 
@@ -267,6 +268,7 @@ func _ready() -> void:
 	_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_flash.color = Color(1, 0, 0, 0)
+	_flash.visible = false  # A full-screen layer: only drawn while it flashes.
 	root.add_child(_flash)
 
 
@@ -611,8 +613,10 @@ func flash(col: Color) -> void:
 	if _flash_tween:
 		_flash_tween.kill()
 	_flash.color = col
+	_flash.visible = true
 	_flash_tween = create_tween()
 	_flash_tween.tween_property(_flash, "color:a", 0.0, 0.5)
+	_flash_tween.tween_callback(func(): _flash.visible = false)
 
 
 func show_toast(text: String, col := Color.WHITE) -> void:
@@ -743,7 +747,10 @@ func _refresh_powers() -> void:
 	if fast:
 		var b: Rect2 = game.board_rect
 		var sz := Vector2(minf(b.size.x - 16.0, roundf(speed_badge.width_for(34.0))), 34)
-		speed_badge.queue_redraw()
+		var bk := "%s|%.2f" % [speed_badge._texts(), game.hold_ramp()]
+		if bk != _badge_key:
+			_badge_key = bk
+			speed_badge.queue_redraw()
 		var y := b.position.y + 10.0
 		if game.tutorial.active and game.tutorial.visible:
 			y = game.tutorial._panel.get_global_rect().end.y + 8.0

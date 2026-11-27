@@ -434,6 +434,34 @@ func _run() -> void:
 	await frames(1)
 	check(game.freezes == 0 and game.freeze_timer > 0.0, "Q uses the next freeze charge")
 
+	# --- smooth on any phone: quality steps down when frames are slow ---
+	game.start_run()
+	await frames(1)
+	game._start_flow()
+	game.set_quality(0)
+	for i in 60:
+		game._govern(1.0 / 60.0)
+	check(game.quality == 0, "60 frames a second keeps full quality")
+	for i in 100:
+		game._govern(1.0 / 30.0)
+	check(game.quality == 1, "3 s of slow frames (30 a second) drop the decorations (quality %d)" % game.quality)
+	for i in 100:
+		game._govern(1.0 / 30.0)
+	check(game.quality == 2, "still slow: the board renders at a lower resolution too (quality %d)" % game.quality)
+	game.set_quality(0)
+	game.toggle_pause()
+	for i in 200:
+		game._govern(1.0 / 20.0)
+	game.toggle_pause()
+	for i in 20:
+		game._govern(0.5)
+	check(game.quality == 0, "pauses and one-off hitches (switching tabs) don't count")
+	var lt := Tile.new()
+	for pc in P.COUNT:
+		lt.piece = pc
+		check(SpriteAtlas.dry_sprite_for(lt) >= 0, "the live tile stamps the dry pipe from the atlas (piece %d)" % pc)
+	game.set_quality(0)
+
 	# --- hold to speed up ---
 	game.mode = "unlock"
 	game.start_run()
