@@ -60,6 +60,7 @@ var _layout_key: Array = []
 ## so scrolling moves one node instead of every row every frame.
 var _rows_base := -1000000
 var _rows_place := true
+var _rows_zbase := -1000000   ## The bottom visible row when the rows' z order was last set.
 var _backdrop_key: Array = []
 var _queue_sig: Array = []
 ## Particles, as parallel packed arrays (far cheaper per frame than a
@@ -253,6 +254,11 @@ func _sync_rows() -> void:
 	# row_y(r) == this + the row's own fixed offset (T is a whole number of pixels).
 	var off := shake_offset()
 	rows_root.position = Vector2(off.x, snap(b.end.y + (cam.y - _rows_base) * T) + off.y)
+	# Draw order: higher rows on top, counted from the bottom visible row, so
+	# it stays small (1..~20) and every row stays under the live tile, glow and
+	# effects layers (139+). Only redone when the view moves on by a row.
+	var restack := rr.x != _rows_zbase
+	_rows_zbase = rr.x
 	for r in row_views.keys():
 		if r < rr.x or r > rr.y:
 			var v: Layer = row_views[r]
@@ -278,10 +284,12 @@ func _sync_rows() -> void:
 			v.visible = true
 			row_views[r] = v
 			v.position = Vector2(0, -(r + 1 - _rows_base) * T)
-			v.z_index = 1 + r - _rows_base
-		elif _rows_place:
-			v.position = Vector2(0, -(r + 1 - _rows_base) * T)
-			v.z_index = 1 + r - _rows_base
+			v.z_index = 1 + r - rr.x
+		else:
+			if _rows_place:
+				v.position = Vector2(0, -(r + 1 - _rows_base) * T)
+			if restack or _rows_place:
+				v.z_index = 1 + r - rr.x
 		var stamp := grid.version(r) * 4 + (1 if r < grid.floor_row else 0) + (2 if grid.rows.has(r) else 0)
 		if _animate_until.has(r) or v.stamp != stamp:
 			v.queue_redraw()

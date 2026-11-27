@@ -245,6 +245,11 @@ func _run() -> void:
 		zones_seen[game.zone_index] = true
 	check(game.height >= target, "perfect play climbs to row %d (reached %d, %s)" % [target, game.height, game.last_reason])
 	check(zones_seen.size() >= 4, "passed through 4 zones (%d)" % zones_seen.size())
+	var top_z := -100000
+	for v in game.renderer.row_views.values():
+		top_z = maxi(top_z, v.z_index)
+	check(top_z > 0 and top_z < game.renderer.live_base.z_index,
+			"high up, the board rows still draw under the water's tile and the effects (row z %d < %d)" % [top_z, game.renderer.live_base.z_index])
 	check(Zones.title(1) == "ZONE 2" and Zones.title(300) == "ZONE 255", "zone banners are just numbers, up to ZONE 255")
 	# flow.segments also counts the pump itself, which scores nothing.
 	check(game.score == (game.flow.segments - 1) * Tuning.SCORE_TUBE, "score is exactly the tubes filled, nothing per row (height %d, score %d, tubes %d)" % [game.height, game.score, game.flow.segments - 1])
