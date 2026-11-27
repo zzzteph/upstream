@@ -52,8 +52,11 @@ The game has no frame cap: it runs at the display's refresh rate (120 Hz or
 more on high-refresh screens; browsers follow the display too). The aim is
 that play feels instant even on a cheap phone, so every frame is kept small:
 
-- Static art is rasterised once into sprite atlases; board rows are cached
-  and only redrawn when they change; the board renders at low resolution.
+- Nothing is redone that hasn't changed: static art is rasterised once into
+  sprite atlases; board rows are cached and only redrawn when they change,
+  and scrolling moves one parent node instead of every row; the layout is
+  only worked out when the window resizes; the side panel only reformats a
+  number when it changes; the board renders at low resolution.
 - The tile the water is in stamps its dry pipe from the atlas and draws only
   the water as vectors.
 - Bubbles in full pipes are worked out once per row change, then only moved.
@@ -70,6 +73,11 @@ that play feels instant even on a cheap phone, so every frame is kept small:
   (2 GB or less) start at the lighter level. `?quality=0|1|2` forces it.
 - The web page renders at most 2 device pixels per CSS pixel (1.5 on
   low-memory phones), so 3x phone screens don't push 2.25x the pixels.
+
+`?prof` logs, every 2 s, how many microseconds each part of a frame takes
+(game logic, each drawing layer, the panel) - in the browser too, where it
+matters. About 0.25 ms of script a frame in play on a desktop CPU (about
+3x that in the browser).
 
 The solver plans on a snapshot of the visible rows in packed arrays (states
 are ints, the heap is inlined): about 1 ms for a fresh plan on a desktop CPU,
@@ -409,5 +417,6 @@ rebuilding its route after a pipe on it is broken, holding to speed up, and
 not setting a best score, and a 165-row run through four zones.
 
 For testing in a browser, add `?fps` to the URL to log frame rate and draw
-calls to the console, `?autoplay` to let a bot play, and `?powers` to start
+calls to the console, `?prof` to log where each frame's time goes,
+`?quality=0|1|2` to force a quality level, `?autoplay` to let a bot play, and `?powers` to start
 with three Flow-freezes and three Reveals.

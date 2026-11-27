@@ -19,7 +19,10 @@ const REASONS := {
 
 var state := State.TITLE
 var paused := false
-var mode: String = Tuning.DEFAULT_MODE  ## "unlock" (BioShock-style) or "classic" (piece queue).
+var mode: String = Tuning.DEFAULT_MODE:  ## "unlock" (BioShock-style) or "classic" (piece queue).
+	set(v):
+		mode = v
+		_layout_dirty = true
 var grid := Grid.new()
 var gen := LevelGenerator.new()
 var flow := Flow.new()
@@ -91,6 +94,8 @@ var freeze_rect := Rect2()   ## Milestone power buttons (shown while playing).
 var reveal_rect := Rect2()
 var pause_rect := Rect2()    ## The pause button (top of the panel, above the hand).
 var _slots: Array = []
+var _layout_cache: Array = []
+var _layout_dirty := true
 
 # Pointer / keyboard cursor
 var hover := Vector2i(-1, -1)
@@ -102,6 +107,10 @@ var kb_active := false
 var debug_fps := false
 var debug_autoplay := false
 var debug_powers := false   ## ?powers: start each run with 3 Flow-freezes and 3 Reveals.
+var debug_prof := false     ## ?prof: log where each frame's time goes (every 2 s).
+var _prof_frames := 0
+var _prof_timer := 0.0
+var _prof_t := 0
 ## Quality, so play stays smooth on any phone: 0 = everything; 1 = no
 ## decorative motion (background bubbles and decorations, bubbles in pipes,
 ## particle glow); 2 = also a lower-resolution board. It steps down by itself
@@ -143,6 +152,7 @@ func _ready() -> void:
 	ui.root.add_child(tutorial)
 	tutorial_pending = not SaveData.load_flag("tutorial_done")
 	_read_debug_flags()
+	get_tree().root.size_changed.connect(func(): _layout_dirty = true)
 	if debug_autoplay:
 		tutorial_pending = false
 	_compute_layout()
@@ -296,21 +306,26 @@ func _random_piece() -> int:
 # --- frame update --------------------------------------------------------------------
 
 func _process(dt: float) -> void:
+	if debug_prof:
+		_prof_report(dt)
 	_govern(dt)
 	dt = minf(dt, 0.05)
 	time += dt
 	_compute_layout()
+	_mark("layout")
 	if not paused:
 		match state:
 			State.COUNTDOWN, State.RUNNING:
 				_update_play(dt)
 			State.SPILL:
 				_update_spill(dt)
+		_mark("play")
 		renderer.update_fx(dt)
 		queue_shift = maxf(0.0, queue_shift - dt * 7.0)
 		var head := flow.head_world() if (flow.active or state == State.SPILL or state == State.GAMEOVER) \
 				else Vector2(Tuning.SOURCE_COL + 0.5, 0.5)
 		cam.update(dt, head.y, grid.floor_row)
+		_mark("fx+cam")
 	_ensure_rows()
 	if debug_autoplay:
 		_autoplay_step()
@@ -323,9 +338,43 @@ func _process(dt: float) -> void:
 					Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 					Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
 					height, score, State.keys()[state], grid.row_count()])
+	_mark("rows+debug")
 	renderer.redraw()
+	_mark("redraw")
 	ui.refresh()
+	_mark("ui")
 
+
+## ?prof: add the time since the last mark to `key`.
+func _mark(key: String) -> void:
+	if not debug_prof:
+		return
+	var now := Time.get_ticks_usec()
+	BoardRenderer.prof[key] = int(BoardRenderer.prof.get(key, 0)) + now - _prof_t
+	_prof_t = now
+
+
+## ?prof: every 2 s, print the average microseconds per frame of each part
+## (draw:* are the layers' drawing; frame is the whole frame interval).
+func _prof_report(dt: float) -> void:
+	_prof_t = Time.get_ticks_usec()
+	_prof_frames += 1
+	_prof_timer += dt
+	if _prof_timer < 2.0:
+		return
+	var p := BoardRenderer.prof
+	var keys := p.keys()
+	keys.sort_custom(func(a, b): return p[a] > p[b])
+	var total := 0
+	var parts := []
+	for k in keys:
+		total += int(p[k])
+		parts.append("%s %d" % [k, int(p[k]) / _prof_frames])
+	print("PROF fps %d | frame %d us | ours %d us | %s | quality %d" % [Engine.get_frames_per_second(),
+			int(_prof_timer * 1e6) / _prof_frames, total / _prof_frames, " ".join(parts), quality])
+	BoardRenderer.prof = {}
+	_prof_frames = 0
+	_prof_timer = 0.0
 
 ## Step quality down when frames are slow (under ~45 a second) for 3 seconds
 ## of play. Pauses, the menu and one-off hitches (a frame over 0.25 s, such
@@ -345,6 +394,7 @@ func _govern(dt: float) -> void:
 
 func set_quality(q: int) -> void:
 	quality = clampi(q, 0, 2)
+	_layout_dirty = true
 	_slow_for = 0.0
 	_frame_avg = 0.0
 
@@ -853,7 +903,18 @@ func _px(v: float) -> float:
 
 
 func _compute_layout() -> void:
+	# Only when the window (or the quality or mode) changes: it asks the
+	# browser for the screen scale and touch support, which costs every frame
+	# otherwise. Setting the content scale resizes the viewport, so it runs
+	# until the size settles.
+	if not _layout_dirty:
+		return
 	var win := get_window()
+	var lkey := [win.size if win != null else Vector2i.ZERO, get_viewport_rect().size, quality, mode]
+	if lkey == _layout_cache:
+		_layout_dirty = false
+		return
+	_layout_cache = lkey
 	if win != null and win.size.x > 0:
 		# Pick the virtual resolution from the screen's real (logical) size, so
 		# phones get a smaller base and therefore bigger text and buttons.
@@ -991,6 +1052,9 @@ func _read_debug_flags() -> void:
 	debug_fps = qs.contains("fps")
 	debug_autoplay = qs.contains("autoplay")
 	debug_powers = qs.contains("powers")
+	debug_prof = qs.contains("prof")
+	if debug_prof:
+		BoardRenderer.prof = {"init": 0}
 	var qi := qs.find("quality=")
 	if qi >= 0:
 		set_quality(int(qs.substr(qi + 8, 1)))

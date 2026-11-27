@@ -19,9 +19,20 @@ class Layer:
 	var draw_cb: Callable
 	var row := -999999
 	var stamp := -1
+	var label := ""
 
 	func _draw() -> void:
+		if BoardRenderer.prof.is_empty():
+			draw_cb.call(self)
+			return
+		var t0 := Time.get_ticks_usec()
 		draw_cb.call(self)
+		var k := "draw:" + (label if label != "" else "rows")
+		BoardRenderer.prof[k] = int(BoardRenderer.prof.get(k, 0)) + Time.get_ticks_usec() - t0
+
+
+## ?prof: microseconds spent per section since the last report (see main.gd).
+static var prof := {}
 
 
 var game  ## The Game node (main.gd).
@@ -44,8 +55,13 @@ var text_layer: Layer
 var row_views := {}       ## row -> Layer
 var _pool: Array = []
 var _animate_until := {}  ## row -> game time until which it redraws every frame
-var _layout_key := ""
-var _queue_sig := ""
+var _layout_key: Array = []
+## Rows are placed relative to this row and rows_root moves with the camera,
+## so scrolling moves one node instead of every row every frame.
+var _rows_base := -1000000
+var _rows_place := true
+var _backdrop_key: Array = []
+var _queue_sig: Array = []
 ## Particles, as parallel packed arrays (far cheaper per frame than a
 ## Dictionary each): position and velocity in world units, life left and at
 ## the start, size, gravity, colour, and whether it glows.
@@ -111,6 +127,7 @@ func _ready() -> void:
 func _layer(cb: Callable, z: int, parent: Node = null) -> Layer:
 	var l := Layer.new()
 	l.draw_cb = cb
+	l.label = cb.get_method().trim_prefix("_draw_")
 	l.z_index = z
 	(parent if parent != null else self).add_child(l)
 	return l
@@ -118,7 +135,19 @@ func _layer(cb: Callable, z: int, parent: Node = null) -> Layer:
 
 func redraw() -> void:
 	_sync_rows()
-	backdrop.queue_redraw()
+	_rows_place = false
+	# The backdrop moves every frame at full quality; in the lighter modes it's
+	# a still gradient, redrawn only when it changes.
+	if game.quality == 0:
+		backdrop.queue_redraw()
+	else:
+		var cr: float = game.cam.y + game.cam.visible_rows * 0.5
+		var zi := Zones.index_for_row(int(floor(cr)))
+		var local := cr - zi * Tuning.ZONE_ROWS
+		var bk := [zi, snappedf(minf(local, 6.0), 0.1), game.view_size, game.board_rect, game.quality]
+		if bk != _backdrop_key:
+			_backdrop_key = bk
+			backdrop.queue_redraw()
 	live_base.queue_redraw()
 	live.queue_redraw()
 	glow.queue_redraw()
@@ -138,7 +167,7 @@ func invalidate_rows() -> void:
 	for v in row_views.values():
 		v.stamp = -1
 	_animate_until.clear()
-	_queue_sig = ""
+	_queue_sig = []
 
 
 func animate_row(r: int, until: float) -> void:
@@ -210,14 +239,20 @@ func _is_live(t: Tile, c: int, r: int) -> bool:
 func _sync_rows() -> void:
 	var T: float = game.T
 	var b: Rect2 = game.board_rect
-	var key := "%.4f|%.3f|%.3f|%d" % [T, b.position.x, b.size.x, atlas.tile_px]
+	var key := [T, b.position.x, b.size.x, b.end.y, atlas.tile_px]
 	if key != _layout_key:
 		_layout_key = key
 		invalidate_rows()
+		_rows_place = true
 	var cam: GameCamera = game.cam
 	var grid: Grid = game.grid
 	var rr := cam.row_range()
-	rows_root.position = shake_offset()
+	if _rows_base < -999999 or absi(rr.x - _rows_base) > 1500:
+		_rows_base = rr.x
+		_rows_place = true
+	# row_y(r) == this + the row's own fixed offset (T is a whole number of pixels).
+	var off := shake_offset()
+	rows_root.position = Vector2(off.x, snap(b.end.y + (cam.y - _rows_base) * T) + off.y)
 	for r in row_views.keys():
 		if r < rr.x or r > rr.y:
 			var v: Layer = row_views[r]
@@ -242,8 +277,11 @@ func _sync_rows() -> void:
 			v.stamp = -1
 			v.visible = true
 			row_views[r] = v
-		v.position = Vector2(0, row_y(r))
-		v.z_index = 1 + r - rr.x
+			v.position = Vector2(0, -(r + 1 - _rows_base) * T)
+			v.z_index = 1 + r - _rows_base
+		elif _rows_place:
+			v.position = Vector2(0, -(r + 1 - _rows_base) * T)
+			v.z_index = 1 + r - _rows_base
 		var stamp := grid.version(r) * 4 + (1 if r < grid.floor_row else 0) + (2 if grid.rows.has(r) else 0)
 		if _animate_until.has(r) or v.stamp != stamp:
 			v.queue_redraw()
@@ -944,10 +982,9 @@ func _deco(ci: CanvasItem, pal: Dictionary, alpha: float) -> void:
 
 # --- queue panel ---------------------------------------------------------------------------
 
-func _queue_signature() -> String:
+func _queue_signature() -> Array:
 	# Includes whether each animation is running, so the frame after it ends is redrawn too.
-	return "%s|%d|%s|%d|%s|%d|%d|%s|%s|%s|%d|%s" % [str(game.queue), game.zone_index, game.portrait,
-			game.state, game.queue_rect, atlas.icon_px, atlas.tile_px,
+	return [game.queue.hash(), game.zone_index, game.portrait, game.state, game.queue_rect, atlas.icon_px, atlas.tile_px,
 			game.queue_shift > 0.0, game.lock_timer > 0.0, game.mode, game.held_piece, game.stats_rect]
 
 

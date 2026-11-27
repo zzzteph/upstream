@@ -219,7 +219,9 @@ var hud: Control
 var stat_values := {}     ## "HEIGHT" / "SCORE" -> value Label.
 var stat_captions := {}   ## "HEIGHT" / "SCORE" -> caption Label.
 var stat_plates := {}     ## "HEIGHT" / "SCORE" -> StatPlate behind them.
-var _stats_key := ""
+var _stats_key: Array = []
+var _shown_height := -1
+var _shown_score := -1
 var btn_freeze: HudButton
 var btn_reveal: HudButton
 var btn_pause: HudButton
@@ -644,8 +646,12 @@ func refresh() -> void:
 		_last_portrait = game.portrait
 		_apply_layout()
 
-	_set_text(stat_values["HEIGHT"], "%d" % game.height)
-	_set_text(stat_values["SCORE"], "%d" % game.score)
+	if game.height != _shown_height:
+		_shown_height = game.height
+		_set_text(stat_values["HEIGHT"], "%d" % game.height)
+	if game.score != _shown_score:
+		_shown_score = game.score
+		_set_text(stat_values["SCORE"], "%d" % game.score)
 	_place_stats()
 
 	_refresh_powers()
@@ -659,7 +665,7 @@ func refresh() -> void:
 ## when the area is wide (portrait bar).
 func _place_stats() -> void:
 	var r: Rect2 = game.stats_rect
-	var key := "%s|%s" % [r, game.portrait]
+	var key := [r, game.portrait]
 	if key == _stats_key:
 		return
 	_stats_key = key
@@ -781,7 +787,7 @@ func _apply_layout() -> void:
 	solver_button.custom_minimum_size = Vector2(minf(220.0, bw * 0.7), ai_h)
 	solver_button.add_theme_font_size_override("font_size", 18 if short else 20)
 	over_reason.custom_minimum_size = Vector2(minf(420.0, vs.x - 96.0), 0)
-	_stats_key = ""
+	_stats_key = []
 	new_game_button.custom_minimum_size = Vector2(bw, bh)
 	new_game_button.add_theme_font_size_override("font_size", 28 if short else 34)
 	banner.position = Vector2(0, -vs.y * 0.22)
