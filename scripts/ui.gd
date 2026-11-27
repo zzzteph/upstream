@@ -289,8 +289,8 @@ class RivetPanel:
 
 	func _draw() -> void:
 		for c in [Vector2(16, 16), Vector2(size.x - 16, 16), Vector2(16, size.y - 16), size - Vector2(16, 16)]:
-			draw_circle(c, 4.5, Color("11181d"))
-			draw_circle(c - Vector2(1, 1), 2.5, Color("8fa3ab"))
+			draw_circle(c, 4.5, Color("11181d"), true, -1.0, true)
+			draw_circle(c - Vector2(1, 1), 2.5, Color("8fa3ab"), true, -1.0, true)
 
 
 func _box(bg: Color, border: Color, radius := 14, bw := 3, shadow := 6) -> StyleBoxFlat:

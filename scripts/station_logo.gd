@@ -76,15 +76,15 @@ func _draw() -> void:
 	_sb.set_border_width_all(int(maxf(2.0, 4.0 * k)))
 	_sb.set_corner_radius_all(int(16.0 * k))
 	draw_style_box(_sb, plate)
-	draw_line(plate.position + Vector2(6, 6) * k, Vector2(plate.end.x - 6.0 * k, plate.position.y + 6.0 * k), STEEL_LIGHT, maxf(2.0, 3.0 * k))
+	draw_line(plate.position + Vector2(6, 6) * k, Vector2(plate.end.x - 6.0 * k, plate.position.y + 6.0 * k), STEEL_LIGHT, maxf(2.0, 3.0 * k), true)
 	# Hazard strip along the bottom.
 	var band := Rect2(plate.position.x + 5.0 * k, plate.end.y - 22.0 * k, plate.size.x - 10.0 * k, 16.0 * k)
 	_hazard(band, k)
 	# Rivets.
 	for c in [Vector2(14, 16), Vector2(plate.size.x / k - 14, 16), Vector2(14, plate.size.y / k - 34), Vector2(plate.size.x / k - 14, plate.size.y / k - 34)]:
 		var p: Vector2 = plate.position + c * k
-		draw_circle(p, 5.0 * k, STEEL_DARK)
-		draw_circle(p - Vector2(1, 1) * k, 3.0 * k, STEEL_LIGHT.lightened(0.3))
+		draw_circle(p, 5.0 * k, STEEL_DARK, true, -1.0, true)
+		draw_circle(p - Vector2(1, 1) * k, 3.0 * k, STEEL_LIGHT.lightened(0.3), true, -1.0, true)
 	# Pressure gauge.
 	var top := plate.position.y + 12.0 * k
 	var inner_h := band.position.y - top
@@ -111,26 +111,26 @@ func _hazard(band: Rect2, k: float) -> void:
 		for v in [Vector2(x, band.end.y), Vector2(x + w * 0.5, band.end.y), Vector2(x + w * 0.5 + band.size.y, band.position.y), Vector2(x + band.size.y, band.position.y)]:
 			pts.append(Vector2(clampf(v.x, band.position.x, band.end.x), v.y))
 		if pts[1].x - pts[0].x > 0.5 or pts[2].x - pts[3].x > 0.5:
-			draw_colored_polygon(pts, Color("1a1a1a"))
+			GameUI.smooth_poly(self, pts, Color("1a1a1a"))
 		x += w
 	draw_rect(band, STEEL_DARK, false, maxf(1.0, 2.0 * k))
 
 
 func _gauge(c: Vector2, r: float, k: float) -> void:
-	draw_circle(c + Vector2(3, 3) * k, r, Color(0, 0, 0, 0.5))
-	draw_circle(c, r, STEEL_DARK)
-	draw_circle(c, r * 0.86, Color("dfe6e8"))
+	draw_circle(c + Vector2(3, 3) * k, r, Color(0, 0, 0, 0.5), true, -1.0, true)
+	draw_circle(c, r, STEEL_DARK, true, -1.0, true)
+	draw_circle(c, r * 0.86, Color("dfe6e8"), true, -1.0, true)
 	# Red zone and ticks on a 270-degree dial.
 	var a0 := PI * 0.75
 	var a1 := PI * 2.25
-	draw_arc(c, r * 0.68, lerpf(a0, a1, 0.78), a1, 12, Color("e0402a"), maxf(2.0, r * 0.12), PipeArt.aa)
+	draw_arc(c, r * 0.68, lerpf(a0, a1, 0.78), a1, 24, Color("e0402a"), maxf(2.0, r * 0.12), true)
 	for i in 11:
 		var a := lerpf(a0, a1, i / 10.0)
 		var inner := 0.56 if i % 5 == 0 else 0.64
-		draw_line(c + Vector2.from_angle(a) * r * inner, c + Vector2.from_angle(a) * r * 0.76, STEEL_DARK, maxf(1.0, r * (0.06 if i % 5 == 0 else 0.035)))
+		draw_line(c + Vector2.from_angle(a) * r * inner, c + Vector2.from_angle(a) * r * 0.76, STEEL_DARK, maxf(1.0, r * (0.06 if i % 5 == 0 else 0.035)), true)
 	# The needle hovers near the red, twitching with the pump.
 	var v := 0.66 + 0.06 * sin(time * 2.3) + 0.02 * sin(time * 17.0)
 	var na := lerpf(a0, a1, v)
-	draw_line(c, c + Vector2.from_angle(na) * r * 0.7, Color("c0201a"), maxf(2.0, r * 0.08), PipeArt.aa)
-	draw_circle(c, r * 0.12, STEEL_DARK)
-	draw_circle(c - Vector2(r, r) * 0.03, r * 0.05, STEEL_LIGHT)
+	draw_line(c, c + Vector2.from_angle(na) * r * 0.7, Color("c0201a"), maxf(2.0, r * 0.08), true)
+	draw_circle(c, r * 0.12, STEEL_DARK, true, -1.0, true)
+	draw_circle(c - Vector2(r, r) * 0.03, r * 0.05, STEEL_LIGHT, true, -1.0, true)

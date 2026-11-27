@@ -12,6 +12,13 @@ var game  ## The Game node (main.gd).
 
 
 func _input(event: InputEvent) -> void:
+	# Note how the player plays (every event passes here, even taps on buttons).
+	if event is InputEventScreenTouch and event.pressed:
+		game.note_input("touch")
+	elif event is InputEventMouseButton and event.pressed and event.device != InputEvent.DEVICE_ID_EMULATION:
+		game.note_input("mouse")
+	elif event is InputEventKey and event.pressed and not event.echo:
+		game.note_input("keys")
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		game.on_hold(false)
 	elif event is InputEventKey and event.keycode == KEY_F and not event.pressed:

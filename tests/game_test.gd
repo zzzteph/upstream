@@ -462,6 +462,17 @@ func _run() -> void:
 		check(SpriteAtlas.dry_sprite_for(lt) >= 0, "the live tile stamps the dry pipe from the atlas (piece %d)" % pc)
 	game.set_quality(0)
 
+	# --- the walkthrough talks the way you play ---
+	game.pointer_kind = "touch"
+	game.used_keys = false
+	check(game.touch_ui(), "after a tap it talks about fingers")
+	game.pointer_kind = "mouse"
+	check(not game.touch_ui(), "after a click it talks about the mouse")
+	game.note_input("touch")
+	check(game.touch_ui(), "a tap switches it back")
+	game.pointer_kind = ""
+	game.used_keys = false
+
 	# --- hold to speed up ---
 	game.mode = "unlock"
 	game.start_run()
@@ -559,6 +570,20 @@ func _run() -> void:
 	click(tut._ok.get_global_rect().get_center())
 	await frames(1)
 	check(tut.step == tut.Step.SPEED, "walkthrough 6: how to speed up")
+	var keys_were: bool = game.used_keys
+	game.pointer_kind = "mouse"
+	game.used_keys = false
+	await frames(1)
+	check(tut._text.text.begins_with("Hold the mouse button down to") and not tut._text.text.contains("F key"),
+			"on a computer it says the mouse, and no key you haven't used (%s)" % tut._text.text.substr(0, 40))
+	game.used_keys = true
+	await frames(1)
+	check(tut._text.text.contains("(or the F key)"), "once you've used the keyboard it mentions F")
+	game.pointer_kind = "touch"
+	await frames(1)
+	check(tut._text.text.begins_with("Hold your finger on the screen") and not tut._text.text.contains("F key"), "on a phone: your finger, never a key")
+	game.pointer_kind = ""
+	game.used_keys = keys_were
 	press_at(spot)
 	await frames(60)
 	press_at(spot, false)

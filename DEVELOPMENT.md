@@ -159,7 +159,11 @@ numbers from `tuning.gd`) (OK to continue; there is no skip). A
 coach panel sits at the top of the board, everything but the target is dimmed
 (a spotlight), and a pulsing frame with a bouncing arrow points at it. The
 pump's countdown waits while it runs. When it's finished the flag
-`tutorial_done` is saved and it never shows again.
+`tutorial_done` is saved and it never shows again. It words things the way
+the player plays (`touch_ui()` in `main.gd`): tap and finger after a touch,
+click and the mouse after a click, and the F key only once they've pressed a
+key; before any input it goes by the browser's main pointer (a finger on
+phones and tablets, a mouse on a laptop even with a touch screen).
 
 ## Feedback
 

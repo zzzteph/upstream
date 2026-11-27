@@ -10,7 +10,7 @@ enum State { TITLE, COUNTDOWN, RUNNING, SPILL, GAMEOVER }
 const REASONS := {
 	"rock": "The water smashed into a rock.",
 	"empty": "The water poured out onto an empty tile.",
-	"leak": "The water leaked out of an open pipe end.",
+	"leak": "",    # Plain enough on screen; no message.
 	"wall": "The water hit the wall.",
 	"oneway": "The water hit a one-way pipe from the wrong side.",
 	"clogged": "The water ran into a pipe that was already full.",
@@ -35,6 +35,9 @@ var atlas: SpriteAtlas
 var world_view: TextureRect          ## PS1 mode: shows the world viewport, scaled to the screen.
 var world_vp: SubViewport            ## PS1 mode: the world renders in here, at PS1_SHORT_SIDE lines.
 var is_touch := false
+var pointer_kind := ""        ## "touch" or "mouse": how the player last pointed (what the walkthrough says).
+var used_keys := false        ## The player has pressed a key this session (only then mention keys).
+var _coarse_pointer := false  ## Before any input: the device's main pointer is a finger (phone, tablet).
 var input_handler: InputHandler
 var ui: GameUI
 var sfx: Sfx
@@ -768,6 +771,21 @@ func _check_hand() -> void:
 
 # --- input entry points ---------------------------------------------------------------------
 
+## How the player plays, from what they actually use: "touch", "mouse" or "keys".
+func note_input(kind: String) -> void:
+	if kind == "keys":
+		used_keys = true
+	else:
+		pointer_kind = kind
+
+
+## Talk about fingers and taps (true) or the mouse and clicks (false)?
+func touch_ui() -> bool:
+	if pointer_kind != "":
+		return pointer_kind == "touch"
+	return _coarse_pointer
+
+
 func on_pointer_move(pos: Vector2, touch := false) -> void:
 	hover = screen_to_tile(pos)
 	hover_active = not touch and board_rect.has_point(pos) and is_tile_visible(hover.x, hover.y)
@@ -1052,6 +1070,13 @@ func _read_debug_flags() -> void:
 	debug_fps = qs.contains("fps")
 	debug_autoplay = qs.contains("autoplay")
 	debug_powers = qs.contains("powers")
+	_coarse_pointer = DisplayServer.is_touchscreen_available()
+	if OS.has_feature("web"):
+		# A laptop with a touch screen still points with a mouse: ask what the
+		# main pointer is.
+		var cp = JavaScriptBridge.eval("!!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)", true)
+		if cp != null:
+			_coarse_pointer = bool(cp)
 	debug_prof = qs.contains("prof")
 	if debug_prof:
 		BoardRenderer.prof = {"init": 0}

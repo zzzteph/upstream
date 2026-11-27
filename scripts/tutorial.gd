@@ -124,7 +124,7 @@ func _fits_up(item: int) -> bool:
 ## to point at.
 func _first_pipe() -> void:
 	var slot: Tile = game.grid.get_tile(SLOT.x, SLOT.y)
-	var tap := "Tap" if game.is_touch else "Click"
+	var tap := "Tap" if game.touch_ui() else "Click"
 	var cell := Vector2i(-1, -1)
 	var txt := ""
 	if slot == null:
@@ -180,7 +180,11 @@ func _process(dt: float) -> void:
 			_set_text("That's it! The water flows up through connected pipes. Keep building a way up: if the water reaches a closed hatch, a rock or an open pipe end, the run is over.")
 			_target = game.renderer.tile_rect(SLOT.x, SLOT.y).merge(game.renderer.tile_rect(SLOT.x, 0))
 		Step.SPEED:
-			var hold := "Hold your finger on the screen" if game.is_touch else "Hold the mouse button down (or the F key)"
+			# Say it the way this player plays: a finger on a phone, the mouse on
+			# a computer, and the F key only once they've used the keyboard.
+			var hold := "Hold your finger on the screen"
+			if not game.touch_ui():
+				hold = "Hold the mouse button down (or the F key)" if game.used_keys else "Hold the mouse button down"
 			_set_text("%s to speed the water up x%d and score %dx per tube. Keep holding: every tube adds 10%% more, up to x%d speed and %dx points. Let go to slow it down again." % [
 					hold, int(Tuning.HOLD_SPEED_MULT), int(Tuning.HOLD_SCORE_MULT), int(Tuning.HOLD_SPEED_MAX), int(Tuning.HOLD_SCORE_MAX)])
 			_target = b  # Hold anywhere on the board.

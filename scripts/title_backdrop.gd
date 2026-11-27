@@ -130,8 +130,8 @@ func _draw() -> void:
 		var rx := fposmod(size.x * 0.5, pw) - pw
 		while rx < size.x + pw:
 			for d in [-10.0, 10.0]:
-				draw_circle(Vector2(rx + d + 2.0, y + d * 0.0 + 9.0), 2.5, Color(0, 0, 0, 0.45))
-				draw_circle(Vector2(rx + d + 1.5, y + 8.5), 1.2, Color(1, 1, 1, 0.12))
+				draw_circle(Vector2(rx + d + 2.0, y + d * 0.0 + 9.0), 2.5, Color(0, 0, 0, 0.45), true, -1.0, true)
+				draw_circle(Vector2(rx + d + 1.5, y + 8.5), 1.2, Color(1, 1, 1, 0.12), true, -1.0, true)
 			rx += pw
 		y += ph
 	# Cold blue light behind the nameplate.
@@ -144,7 +144,7 @@ func _draw() -> void:
 	var w := band.size.y * 1.6
 	var sx := -band.size.y
 	while sx < size.x:
-		draw_colored_polygon(PackedVector2Array([Vector2(sx, band.end.y), Vector2(sx + w * 0.5, band.end.y),
+		GameUI.smooth_poly(self, PackedVector2Array([Vector2(sx, band.end.y), Vector2(sx + w * 0.5, band.end.y),
 				Vector2(sx + w * 0.5 + band.size.y, band.position.y), Vector2(sx + band.size.y, band.position.y)]), Color("1a1a1a"))
 		sx += w
 	draw_rect(Rect2(0, band.position.y - 3, size.x, 3), Color("11181d"))
