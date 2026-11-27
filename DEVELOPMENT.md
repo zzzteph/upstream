@@ -85,6 +85,15 @@ and an unchanged board reuses the last plan (40 us).
 
 ## Web page
 
+**Loading screen.** `web/shell.html` is the page template the web export
+uses (`html/custom_html_shell`; Godot's own shell with its loading screen
+replaced). While the game downloads it shows the UPSTREAM nameplate from the
+main menu, drawn as an SVG to the same measurements as `station_logo.gd`, on
+the menu's colours: the blue rule under the name is the progress bar and the
+gauge needle rises with it (a short sweep when the size isn't known yet). When
+the game starts, the nameplate fades out over the menu's own.
+
+
 `export_presets.cfg` adds a small script to the page head (`html/head_include`;
 the same script is in the claude.ai artifact page). It caps the pixel ratio
 (above), and makes sound work on phones: browsers only let audio start from
