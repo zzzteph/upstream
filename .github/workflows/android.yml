@@ -1,0 +1,147 @@
+# Builds the Android app:
+#   - upstream-debug.apk: install it on a phone to try the game (test ads).
+#   - upstream.aab: the signed App Bundle for Google Play, built when the
+#     release signing secrets are set (see DEVELOPMENT.md, "Android").
+# Real ads instead of test ads: set the repository variables ADMOB_APP_ID,
+# ADMOB_REWARDED_ID and ADMOB_INTERSTITIAL_ID (Settings > Secrets and
+# variables > Actions > Variables).
+name: Android build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Android SDK packages
+        run: sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+
+      - name: Cache Godot and Android templates
+        id: godot-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-android
+
+      - name: Download Godot and Android templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          mkdir -p ~/godot
+          curl -fsSL --retry 3 -o /tmp/godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d ~/godot
+          curl -fsSL --retry 3 -o /tmp/templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$dest"
+          unzip -q -j /tmp/templates.tpz templates/android_source.zip templates/android_debug.apk templates/android_release.apk templates/version.txt -d "$dest"
+
+      - name: Put Godot on the PATH
+        run: |
+          mkdir -p ~/bin
+          ln -sf ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 ~/bin/godot
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Install the Android build template
+        run: |
+          tpl=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          rm -rf android/build
+          mkdir -p android/build
+          unzip -q "$tpl/android_source.zip" -d android/build
+          touch android/build/.gdignore
+          cat "$tpl/version.txt" | tr -d '\n' > android/.build_version
+
+      - name: Add the AdMob plugin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo godot-sdk-integrations/godot-admob --pattern 'AdmobPlugin-Android-*.zip' -D /tmp/admob
+          ls /tmp/admob
+          unzip -q -o /tmp/admob/AdmobPlugin-Android-*.zip -d /tmp/admob/x
+          # The archive holds the addon (and possibly a top-level folder): copy its addons/ in.
+          src=$(dirname "$(find /tmp/admob/x -path '*addons/AdmobPlugin/plugin.cfg' | head -1)")
+          test -n "$src"
+          mkdir -p addons
+          cp -r "$src" addons/
+          printf '\n[editor_plugins]\n\nenabled=PackedStringArray("res://addons/AdmobPlugin/plugin.cfg")\n' >> project.godot
+
+      - name: Ad settings (test ads unless the ADMOB_* variables are set)
+        env:
+          ADMOB_APP_ID: ${{ vars.ADMOB_APP_ID }}
+          ADMOB_REWARDED_ID: ${{ vars.ADMOB_REWARDED_ID }}
+          ADMOB_INTERSTITIAL_ID: ${{ vars.ADMOB_INTERSTITIAL_ID }}
+        run: |
+          test_app="ca-app-pub-3940256099942544~3347511713"
+          if [ -n "$ADMOB_APP_ID" ]; then real=true; app="$ADMOB_APP_ID"; else real=false; app="$test_app"; fi
+          printf '[General]\nis_real = %s\n\n[Debug]\napp_id = "%s"\n\n[Release]\napp_id = "%s"\n' "$real" "$test_app" "$app" > addons/AdmobPlugin/android_export.cfg
+          if [ "$real" = true ]; then
+            printf '[ads]\nis_real=true\nrewarded="%s"\ninterstitial="%s"\n' "$ADMOB_REWARDED_ID" "$ADMOB_INTERSTITIAL_ID" > ad_units.cfg
+          fi
+          echo "real ads: $real"
+
+      - name: Editor settings and debug key
+        run: |
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\n' "$ANDROID_HOME" "$JAVA_HOME" > ~/.config/godot/editor_settings-4.7.tres
+          keytool -genkeypair -v -keystore /tmp/debug.keystore -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" > /dev/null
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=/tmp/debug.keystore" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android" >> "$GITHUB_ENV"
+
+      - name: Import project
+        run: godot --headless --import
+
+      - name: Export test APK
+        run: |
+          mkdir -p build/android
+          godot --headless --export-debug "Android APK" build/android/upstream-debug.apk
+          test -f build/android/upstream-debug.apk
+
+      - name: Export signed App Bundle (when the signing secrets are set)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_USER: ${{ secrets.ANDROID_KEYSTORE_USER }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "No ANDROID_KEYSTORE_BASE64 secret: skipping the Play Store bundle."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
+          export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=/tmp/release.keystore
+          export GODOT_ANDROID_KEYSTORE_RELEASE_USER="$KEYSTORE_USER"
+          export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$KEYSTORE_PASSWORD"
+          godot --headless --export-release "Android" build/android/upstream.aab
+          test -f build/android/upstream.aab
+          rm -f /tmp/release.keystore
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: upstream-android
+          path: build/android/
+          if-no-files-found: error

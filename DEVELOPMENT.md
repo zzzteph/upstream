@@ -196,6 +196,64 @@ phones and tablets, a mouse on a laptop even with a touch screen).
   Reveal) per second played, pauses not counted (`actions`, `play_time` in
   `main.gd`). Solver games count the solver's taps.
 
+## Android (Google Play)
+
+The app is `com.thenakedcat.upstream`, "Upstream" by The Naked Cat. Two
+export presets: **Android** (the App Bundle for Google Play) and **Android
+APK** (to install directly on a phone). Both use Godot's Gradle build, target
+Android 16 (API 36), play in portrait, full screen (immersive), with the
+internet, network-state and vibrate permissions. The launcher icons in
+`assets/android/` are made from `icon.svg` by
+`godot --headless --script res://tools/make_android_icons.gd` (a legacy icon
+and the adaptive icon's layers). The back button pauses and resumes a run,
+goes from game over to the menu, and leaves the app from the menu.
+
+**Building.** `.github/workflows/android.yml` builds on every push to `main`
+(and on demand): it installs the Android SDK, Godot's Android build template
+and the AdMob plugin ([godot-sdk-integrations/godot-admob](https://github.com/godot-sdk-integrations/godot-admob),
+its latest Android release), then uploads an `upstream-android` artifact with
+`upstream-debug.apk` (with Google's test ads) and, once the signing secrets
+are set, `upstream.aab` for Google Play. None of that is kept in the
+repository (`android/`, `addons/AdmobPlugin/` and keys are git-ignored).
+
+**Signing** (once; keep the file and passwords safe and out of the repo):
+
+```bash
+keytool -genkeypair -v -keystore upstream-upload.keystore -alias upload -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Then add repository secrets (Settings > Secrets and variables > Actions):
+`ANDROID_KEYSTORE_BASE64` (the keystore file, base64-encoded),
+`ANDROID_KEYSTORE_USER` (`upload`) and `ANDROID_KEYSTORE_PASSWORD`. Google
+Play App Signing then holds the real app signing key; this one is the upload
+key.
+
+**Ads** (`scripts/ads.gd`; Android only, never in the web version, never
+during play, none in solver games):
+
+- *Second chance*, a rewarded ad: after a leak, once per run, the game offers
+  to stop the water where it leaked (6 s to decide). Watching the ad brings
+  the water back, frozen for the length of a Flow-freeze, so the player can
+  fix the way on. If the tile ahead can't be changed (a rock, the wall, a full
+  or fixed pipe), the water first drains back a tile or more (one point per
+  tile) so the pipe it was in can be turned.
+- A full-screen ad before PLAY AGAIN, at most every third game over and never
+  within 3 minutes of the last ad.
+- Google's consent form (UMP) is shown on start where the law needs it; ads
+  load once consent is sorted.
+- Test ads until the repository variables `ADMOB_APP_ID`,
+  `ADMOB_REWARDED_ID` and `ADMOB_INTERSTITIAL_ID` are set (from the AdMob
+  console: the app, a Rewarded unit and an Interstitial unit).
+- `?fakeads` (web) or `--fakeads` pretends to show ads, to try the flow.
+
+**Store requirements already covered:** the privacy policy
+(`web/privacy.html`, published at
+https://zzzteph.github.io/upstream/privacy.html), and the ABOUT screen on
+the menu with Godot's licence and the third-party notices.
+Still to do outside the code: an `app-ads.txt` on the developer website's
+root (AdMob checks it), the store listing, the content rating, the Data
+safety form (the ads SDK collects the advertising ID) and the closed test.
+
 ## Assets and licences
 
 Everything the game shows or plays is made by its own code, so there are no

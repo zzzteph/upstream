@@ -69,6 +69,11 @@ var hold_tubes := 0                ## Tubes filled during the current hold: it s
 var _score_frac := 0.0             ## Fractions of a point (from the hold multiplier) not yet added to the score.
 # AI player and first-run walkthrough
 var ai: AIPlayer
+var ads: Ads
+## Second chance (a rewarded ad on Android): once per run, after a leak, the
+## water can be stopped where it leaked and frozen so the player can fix it.
+var second_chance_used := false
+var offer_time := 0.0              ## Seconds left to take the offer (0 = none showing).
 var tutorial: Tutorial
 var tutorial_pending := false      ## Show the walkthrough at the next run (first game ever).
 var ai_used := false               ## The AI played this run: no best score.
@@ -101,6 +106,7 @@ var debug_fps := false
 var debug_autoplay := false
 var debug_powers := false   ## ?powers: start each run with 3 Flow-freezes and 3 Reveals.
 var debug_prof := false     ## ?prof: log where each frame's time goes (every 2 s).
+var debug_fake_ads := false ## ?fakeads: pretend to show ads (try the second chance on the web).
 var _prof_frames := 0
 var _prof_timer := 0.0
 var _prof_t := 0
@@ -145,6 +151,9 @@ func _ready() -> void:
 	ui.root.add_child(tutorial)
 	tutorial_pending = not SaveData.load_flag("tutorial_done")
 	_read_debug_flags()
+	ads = Ads.new()
+	add_child(ads)
+	ads.setup(debug_fake_ads)
 	get_tree().root.size_changed.connect(func(): _layout_dirty = true)
 	if debug_autoplay:
 		tutorial_pending = false
@@ -181,6 +190,19 @@ func _build_world_viewport() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and (state == State.COUNTDOWN or state == State.RUNNING) and not paused:
 		toggle_pause()
+	elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		# Android's back button: pause (or resume) while playing, back to the
+		# menu from game over, and leave the app from the menu.
+		match state:
+			State.COUNTDOWN, State.RUNNING:
+				toggle_pause()
+			State.GAMEOVER:
+				if offer_time > 0.0:
+					decline_second_chance()
+				else:
+					go_to_title()
+			State.TITLE:
+				get_tree().quit()
 
 
 # --- run lifecycle ------------------------------------------------------------------
@@ -191,6 +213,8 @@ func new_board(seed_value: int) -> void:
 	gen.unlock_mode = mode == "unlock"
 	gen.tutorial_start = tutorial_pending and mode == "unlock" and not ai_game
 	_clear_hand()
+	second_chance_used = false
+	offer_time = 0.0
 	freezes = Tuning.START_POWERS
 	reveals = Tuning.START_POWERS
 	freeze_timer = 0.0
@@ -255,10 +279,16 @@ func start_run(with_ai := false) -> void:
 
 ## PLAY AGAIN / RESTART: the same kind of run as the last one.
 func play_again() -> void:
-	start_run(ai_game)
+	_close_offer()
+	if state == State.GAMEOVER and not ai_game:
+		# Between runs: now and then a full-screen ad first (Android only).
+		ads.between_runs(func(): start_run(ai_game))
+	else:
+		start_run(ai_game)
 
 
 func go_to_title() -> void:
+	_close_offer()
 	paused = false
 	if ai != null and ai.enabled:
 		ai.set_enabled(false)
@@ -310,6 +340,8 @@ func _process(dt: float) -> void:
 		match state:
 			State.COUNTDOWN, State.RUNNING:
 				_update_play(dt)
+			State.GAMEOVER:
+				_tick_offer(dt)
 			State.SPILL:
 				_update_spill(dt)
 		_mark("play")
@@ -431,7 +463,129 @@ func _update_spill(dt: float) -> void:
 		renderer.burst(spill["p"], spill["col"], 2, 2.2, 0.06, 0.8, 9.0)
 	if spill_timer <= 0.0:
 		state = State.GAMEOVER
-		ui.show_game_over(score, height, best, new_best, actions_per_second())
+		if can_offer_second_chance():
+			offer_time = Tuning.SECOND_CHANCE_OFFER
+			ui.show_second_chance()
+		else:
+			_final_game_over()
+
+
+# --- second chance (rewarded ad) --------------------------------------------------------------
+
+func can_offer_second_chance() -> bool:
+	return not ai_game and not second_chance_used and not tutorial_pending and ads != null and ads.rewarded_ready()
+
+
+## The offer runs out by itself after SECOND_CHANCE_OFFER seconds.
+func _tick_offer(dt: float) -> void:
+	if offer_time <= 0.0 or state != State.GAMEOVER:
+		return
+	offer_time -= dt
+	if offer_time <= 0.0:
+		decline_second_chance()
+
+
+func accept_second_chance() -> void:
+	if offer_time <= 0.0 or state != State.GAMEOVER:
+		return
+	offer_time = 0.0
+	sfx.play("click")
+	ads.show_rewarded(func(earned: bool):
+		if earned and state == State.GAMEOVER:
+			_revive()
+		elif state == State.GAMEOVER:
+			_final_game_over())
+
+
+func decline_second_chance() -> void:
+	if offer_time <= 0.0 and state != State.GAMEOVER:
+		return
+	offer_time = 0.0
+	_final_game_over()
+
+
+## Leaving the game-over screen while the offer is up counts as saying no.
+func _close_offer() -> void:
+	if offer_time > 0.0:
+		offer_time = 0.0
+		ads.run_ended()
+
+
+func _final_game_over() -> void:
+	offer_time = 0.0
+	if not ai_game:
+		ads.run_ended()
+	ui.show_game_over(score, height, best, new_best, actions_per_second())
+
+
+## Back into the run: the water waits at the leak, frozen, so the player can
+## fix the way on. If the tile it was going into can't be changed (a rock, the
+## wall, a full or fixed pipe), the water is drained back a tile or more first
+## so the pipe it was in can be turned another way.
+func _revive() -> void:
+	second_chance_used = true
+	var drained := 0
+	while drained < 4 and not _next_fixable():
+		if not _drain_back():
+			break
+		drained += 1
+	flow.resume()
+	state = State.RUNNING
+	spill = {}
+	spill_timer = 0.0
+	last_reason = ""
+	freeze_timer = Tuning.FREEZE_TIME
+	freeze_started = time
+	hold_down = false
+	hold_key = false
+	ui.show_play()
+	ui.show_toast("SECOND CHANCE: FIX THE LEAK!", Color("9dff8a"))
+	sfx.play("freeze")
+	renderer.snow(30)
+
+
+## Can the player change the tile the water goes into next?
+func _next_fixable() -> bool:
+	var v: Vector2i = Pieces.DIR_VEC[flow.exit]
+	var t := grid.get_tile(flow.col + v.x, flow.row + v.y)
+	if t == null:
+		return false
+	return t.hidden or (t.kind == Tile.EMPTY and not t.fixed and not t.has_goo())
+
+
+## Empty the tile the water is in and step the head back to the one before it
+## (full, ready to flow on). False if there's nothing to go back to.
+func _drain_back() -> bool:
+	var t := grid.get_tile(flow.col, flow.row)
+	if t == null or flow.row <= 0 or t.kind != Tile.EMPTY:
+		return false
+	var back: Vector2i = Pieces.DIR_VEC[flow.entry]
+	var pc := flow.col + back.x
+	var pr := flow.row + back.y
+	var prev := grid.get_tile(pc, pr)
+	if prev == null or prev.piece < 0:
+		return false
+	var toward := Pieces.opposite(flow.entry)
+	var ch := -1
+	for c in 2:
+		var en: int = prev.fill_entry[c]
+		if en >= 0 and prev.fill[c] >= 1.0 and Pieces.exit_dir(prev.piece, en) == toward:
+			ch = c
+	if ch < 0:
+		return false
+	t.fill_entry[flow.channel] = -1
+	t.fill[flow.channel] = 0.0
+	grid.touch(flow.row)
+	flow.col = pc
+	flow.row = pr
+	flow.entry = prev.fill_entry[ch]
+	flow.exit = toward
+	flow.channel = ch
+	flow.progress = 1.0
+	flow.segments = maxi(0, flow.segments - 1)
+	score = maxi(0, score - Tuning.SCORE_TUBE)
+	grid.touch(pr)
+	return true
 
 
 func _ensure_rows() -> void:
@@ -1068,6 +1222,7 @@ func _read_debug_flags() -> void:
 		if cp != null:
 			_coarse_pointer = bool(cp)
 	debug_prof = qs.contains("prof")
+	debug_fake_ads = qs.contains("fakeads")
 	if debug_prof:
 		BoardRenderer.prof = {"init": 0}
 	var qi := qs.find("quality=")

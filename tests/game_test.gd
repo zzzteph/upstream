@@ -25,6 +25,30 @@ func check(cond: bool, msg: String) -> void:
 		print("FAIL: ", msg)
 
 
+## A run where the water fills a straight pipe above the pump and then
+## leaks into a rock; returns once it's over (game over or the offer).
+func leak_at_rock() -> void:
+	game.start_run()
+	await frames(1)
+	var t1: Tile = game.grid.get_tile(3, 1)
+	t1.hidden = false
+	t1.kind = Tile.EMPTY
+	t1.set_item(P.V)
+	t1.fixed = false
+	var t2: Tile = game.grid.get_tile(3, 2)
+	t2.hidden = false
+	t2.kind = Tile.ROCK
+	t2.piece = -1
+	game.grid.touch(1)
+	game.grid.touch(2)
+	game._start_flow()
+	game.activate_fast_forward()
+	var g := 0
+	while game.state != game.State.GAMEOVER and g < 60 * 20:
+		await frames(1)
+		g += 1
+
+
 func frames(n: int) -> void:
 	for i in n:
 		await process_frame
@@ -618,6 +642,49 @@ func _run() -> void:
 	await frames(1)
 	check(not tut.active and not game.gen.tutorial_start, "the next game is a normal, unprepared one")
 	check(not "_skip" in tut, "the walkthrough has no SKIP button")
+
+	# --- second chance and ads (pretend ads; the real ones only exist on Android) ---
+	game.ads.setup(true)
+	game.ads.fake_seconds = 0.1
+	game.tutorial_pending = false
+	await leak_at_rock()
+	check(game.state == S.GAMEOVER and game.offer_time > 0.0 and game.ui.offer_screen.visible and not game.ui.over_screen.visible,
+			"after a leak, a second chance is offered (a rewarded ad is ready)")
+	var sc_leak: int = game.score
+	click(game.ui.offer_watch.get_global_rect().get_center())
+	await frames(20)
+	check(game.ads.shown_rewarded == 1 and game.state == S.RUNNING and game.flow.active and game.second_chance_used and game.freeze_timer > 0.0,
+			"watching the ad brings the water back, frozen so you can fix the leak")
+	check(game.flow.row == 0 and not game.grid.get_tile(3, 1).has_goo() and game.score == sc_leak - Tuning.SCORE_TUBE,
+			"with a rock ahead, the water drains back a tile so that pipe can be turned another way")
+	guard = 0
+	while game.state != S.GAMEOVER and guard < 60 * 30:
+		await frames(1)
+		guard += 1
+	check(game.state == S.GAMEOVER and game.offer_time == 0.0 and game.ui.over_screen.visible, "only one second chance per run")
+	await leak_at_rock()
+	await frames(int(Tuning.SECOND_CHANCE_OFFER * 60.0) + 5)
+	check(game.offer_time == 0.0 and game.ui.over_screen.visible and not game.ui.offer_screen.visible, "the offer runs out by itself")
+	# A full-screen ad between runs: every few game overs, never on top of a run.
+	game.ads._runs_since = Ads.INTERSTITIAL_EVERY
+	game.ads._last_ad = -1.0e9
+	var ads_before: int = game.ads.shown_interstitial
+	game.play_again()
+	await frames(1)
+	check(game.ads.shown_interstitial == ads_before + 1 and game.state == S.GAMEOVER, "now and then a full-screen ad shows before the next run")
+	await frames(20)
+	check(game.state == S.COUNTDOWN, "and the next run starts when it closes")
+	await leak_at_rock()
+	game.decline_second_chance()
+	game.play_again()
+	await frames(1)
+	check(game.ads.shown_interstitial == ads_before + 1 and game.state == S.COUNTDOWN, "but not after every game over")
+	# No ads (the web): no offer, straight to game over.
+	game.ads.fake = false
+	game.ads._rewarded_ready = false
+	game.ads._interstitial_ready = false
+	await leak_at_rock()
+	check(game.offer_time == 0.0 and game.ui.over_screen.visible, "without ads there's no second chance (web)")
 
 	# --- SOLVER: a bot that plans routes and plays through taps, at a human pace ---
 	seed(4242)

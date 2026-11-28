@@ -68,6 +68,7 @@ jobs:
           mkdir -p build/web
           godot --headless --export-release "Web" build/web/index.html
           test -f build/web/index.wasm
+          cp web/privacy.html build/web/privacy.html
 
       - uses: actions/configure-pages@v6
 

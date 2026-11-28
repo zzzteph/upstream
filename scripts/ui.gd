@@ -237,6 +237,15 @@ var _best_caption: Label
 var logo: StationLogo
 var pause_screen: Control
 var over_screen: Control
+var offer_screen: Control     ## Second chance (rewarded ad): WATCH AD / NO THANKS, with a countdown bar.
+var about_screen: Control     ## Who made it, the privacy policy, and the engine's licence notices.
+var about_button: Button
+var _about_scroll: ScrollContainer
+var _about_notice: Label
+const PRIVACY_URL := "https://zzzteph.github.io/upstream/privacy.html"
+var offer_watch: Button
+var offer_track: ColorRect
+var offer_fill: ColorRect
 var over_score: Label
 var over_height: Label
 var over_best: Label
@@ -265,6 +274,8 @@ func _ready() -> void:
 	_build_title()
 	_build_pause()
 	_build_over()
+	_build_offer()
+	_build_about()
 	_flash = ColorRect.new()
 	_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -520,6 +531,13 @@ func _build_title() -> void:
 	solver_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_style_button(solver_button, Color("1d3a1f"), Color("5fbf55"))
 	vb.add_child(solver_button)
+	about_button = _button("ABOUT", func(): about_screen.visible = true, 120)
+	about_button.flat = true
+	about_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	about_button.add_theme_font_size_override("font_size", 16)
+	about_button.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+	about_button.custom_minimum_size = Vector2(120, 34)
+	vb.add_child(about_button)
 
 
 func _build_pause() -> void:
@@ -561,6 +579,78 @@ func _build_over() -> void:
 	vb.add_child(_button("MAIN MENU", func(): game.go_to_title()))
 
 
+func _build_about() -> void:
+	about_screen = _overlay()
+	about_screen.z_index = 5
+	var panel := RivetPanel.new()
+	_center_of(about_screen).add_child(panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	panel.add_child(vb)
+	vb.add_child(_label("UPSTREAM", 40, Color.WHITE, 8))
+	vb.add_child(_label("by The Naked Cat", 20, HAZARD, 5))
+	vb.add_child(_label("Made with the Godot Engine (godotengine.org)", 16, Color(1, 1, 1, 0.75), 4))
+	var scroll := ScrollContainer.new()
+	_about_scroll = scroll
+	scroll.custom_minimum_size = Vector2(440, 220)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vb.add_child(scroll)
+	var notice := Label.new()
+	_about_notice = notice
+	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	notice.custom_minimum_size = Vector2(420, 0)
+	notice.add_theme_font_size_override("font_size", 12)
+	notice.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
+	notice.add_theme_constant_override("outline_size", 0)
+	notice.text = _licence_text()
+	scroll.add_child(notice)
+	vb.add_child(_button("PRIVACY POLICY", func(): OS.shell_open(PRIVACY_URL)))
+	vb.add_child(_button("CLOSE", func(): about_screen.visible = false))
+
+
+## Godot's licence and the notices of the libraries built into it (what the
+## MIT licence asks a released game to show).
+func _licence_text() -> String:
+	# The licence text has hard line breaks every ~80 characters: keep only
+	# the paragraph breaks, so it wraps to the screen.
+	var lic := Engine.get_license_text().strip_edges().replace("\n\n", "\u00b6").replace("\n", " ").replace("\u00b6", "\n\n")
+	var t := "Godot Engine\n" + lic + "\n\nThird-party components\n"
+	for info in Engine.get_copyright_info():
+		t += "\n" + str(info["name"])
+		for part in info["parts"]:
+			for line in part["copyright"]:
+				t += "\n  (c) " + str(line)
+			t += "\n  Licence: " + str(part["license"])
+	return t
+
+
+func _build_offer() -> void:
+	offer_screen = _overlay()
+	var panel := RivetPanel.new()
+	_center_of(offer_screen).add_child(panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 12)
+	panel.add_child(vb)
+	vb.add_child(_slabel("LEAK DETECTED", 64, Color("ff6a3a"), 14))
+	vb.add_child(_slabel("SECOND CHANCE?", 34, WATER.lightened(0.3), 8))
+	var note := _label("Watch an ad: the water stops at the leak\nand you get time to fix it.", 20, Color(1, 1, 1, 0.85), 5)
+	vb.add_child(note)
+	# How long the offer lasts: a bar that drains.
+	offer_track = ColorRect.new()
+	offer_track.color = Color(1, 1, 1, 0.12)
+	offer_track.custom_minimum_size = Vector2(0, 8)
+	offer_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(offer_track)
+	offer_fill = ColorRect.new()
+	offer_fill.color = Color("9dff8a")
+	offer_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	offer_track.add_child(offer_fill)
+	offer_watch = _button("WATCH AD", func(): game.accept_second_chance())
+	_style_button(offer_watch, Color("1d3a1f"), Color("5fbf55"))
+	vb.add_child(offer_watch)
+	vb.add_child(_button("NO THANKS", func(): game.decline_second_chance()))
+
+
 # --- screens --------------------------------------------------------------------------------
 
 func show_title(_best: int = 0) -> void:
@@ -568,6 +658,7 @@ func show_title(_best: int = 0) -> void:
 	title_screen.visible = true
 	pause_screen.visible = false
 	over_screen.visible = false
+	offer_screen.visible = false
 	hud.visible = false
 
 
@@ -575,7 +666,16 @@ func show_play() -> void:
 	title_screen.visible = false
 	pause_screen.visible = false
 	over_screen.visible = false
+	offer_screen.visible = false
 	hud.visible = true
+
+
+## After a leak, when a rewarded ad is ready: the second-chance offer.
+func show_second_chance() -> void:
+	over_screen.visible = false
+	offer_screen.visible = true
+	offer_screen.modulate.a = 0.0
+	create_tween().tween_property(offer_screen, "modulate:a", 1.0, 0.25)
 
 
 func show_pause(p: bool) -> void:
@@ -584,6 +684,7 @@ func show_pause(p: bool) -> void:
 
 ## Game over: just LEAK DETECTED and the numbers (no "why" sentence).
 func show_game_over(score: int, height: int, best: int, is_new: bool, aps := 0.0) -> void:
+	offer_screen.visible = false
 	over_score.text = "%d" % score
 	over_height.text = "HEIGHT  %d rows" % height
 	over_best.text = "BEST  %d" % best
@@ -650,6 +751,10 @@ func refresh() -> void:
 	_place_stats()
 
 	_refresh_powers()
+
+	if offer_screen.visible:
+		var k: float = clampf(game.offer_time / Tuning.SECOND_CHANCE_OFFER, 0.0, 1.0)
+		offer_fill.size = Vector2(offer_track.size.x * k, offer_track.size.y)
 
 	if over_new.visible:
 		over_new.modulate = Color.from_hsv(0.13, 0.6 + 0.4 * sin(game.time * 6.0), 1.0)
@@ -777,9 +882,12 @@ func _apply_layout() -> void:
 	best_label.add_theme_font_size_override("font_size", 26 if short else 36)
 	var best_h := 48.0 if short else 64.0
 	var ai_h := 40.0 if short else 46.0
-	var used := bh + ai_h + 3.0 * sep + best_h + 60.0
+	var used := bh + ai_h + 34.0 + 4.0 * sep + best_h + 60.0
 	logo.fit_width(vs.x - 24.0, maxf(60.0, minf(vs.y * (0.3 if short else 0.36), vs.y - used)))
 	solver_button.custom_minimum_size = Vector2(minf(220.0, bw * 0.7), ai_h)
+	var aw := minf(440.0, vs.x - 110.0)
+	_about_scroll.custom_minimum_size = Vector2(aw, minf(220.0, vs.y * 0.3))
+	_about_notice.custom_minimum_size = Vector2(aw - 20.0, 0)
 	solver_button.add_theme_font_size_override("font_size", 18 if short else 20)
 	_stats_key = []
 	new_game_button.custom_minimum_size = Vector2(bw, bh)

@@ -95,17 +95,20 @@ func advance(grid: Grid, amount: float, goo: Color) -> Array:
 	var guard := 0
 	while remaining > 0.0 and active and guard < 32:
 		guard += 1
-		var factor := time_factor(t)
-		var need := (1.0 - progress) * factor
-		if remaining < need:
-			progress += remaining / factor
-			t.fill[channel] = progress
-			break
-		remaining -= need
-		progress = 1.0
-		t.fill[channel] = 1.0
-		segments += 1
-		events.append({"type": "filled", "col": col, "row": row, "tile": t, "channel": channel})
+		# (A tile that is already full - resuming after a second chance - goes
+		# straight on to the next one.)
+		if progress < 1.0:
+			var factor := time_factor(t)
+			var need := (1.0 - progress) * factor
+			if remaining < need:
+				progress += remaining / factor
+				t.fill[channel] = progress
+				break
+			remaining -= need
+			progress = 1.0
+			t.fill[channel] = 1.0
+			segments += 1
+			events.append({"type": "filled", "col": col, "row": row, "tile": t, "channel": channel})
 
 		var v: Vector2i = Pieces.DIR_VEC[exit]
 		var nc := col + v.x
@@ -131,6 +134,14 @@ func advance(grid: Grid, amount: float, goo: Color) -> Array:
 		t = nt
 		events.append({"type": "enter", "col": col, "row": row, "tile": nt, "entry": ne})
 	return events
+
+
+## Second chance: the goo stopped at the end of a full tile because the next
+## one couldn't take it. Start it again from there; it tries the next tile
+## afresh (so if the player has fixed it, it goes on).
+func resume() -> void:
+	active = true
+	block_reason = ""
 
 
 ## Leading edge in world tile units (x right, y up).

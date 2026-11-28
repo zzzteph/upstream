@@ -61,6 +61,7 @@ const AI_CURVY_UNTIL_SPEED := 3.0    ## ...fading out as the water nears this sp
 const START_POWERS := 1              ## Flow-freezes and Reveals you start every run with.
 const POWER_AWARD_ROWS := 100        ## Every this many rows: +1 Flow-freeze and +1 Reveal.
 const FREEZE_TIME := 8.0             ## Seconds the flow stays frozen.
+const SECOND_CHANCE_OFFER := 6.0     ## Seconds to take the second-chance offer after a leak (Android, rewarded ad).
 
 # --- Scoring ----------------------------------------------------------------
 ## Points only for tubes filled (more while holding to speed up): no bonuses or penalties.

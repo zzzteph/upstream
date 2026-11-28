@@ -22,6 +22,7 @@ The pump's pressure gauge counts down to the first surge. After that, the water 
 - **Crack it open, then plan.** Tap a hatch to flip it. Behind it you might find a pipe, an empty slot or a rock. Tap a pipe, then tap where it should go. Closed hatches are light, raised steel, and empty slots are dark sockets, so you can always tell them apart.
 - **Buy yourself time.** Narrow pipes and reservoirs slow the water down, so drag them onto its path when things get tight.
 - **Hold to hurry.** Route ready? Hold your finger on the screen and the water rushes ahead at four times the speed, with every tube scoring double. Keep holding and it builds: each tube adds another 10%, up to 8x the speed and 4x the points. Let go to slow it back down, but the next hold starts from the bottom again.
+- **Second chance.** In the Android app, once per run, you can watch an ad after a leak: the water stops right where it leaked and freezes, so you can fix the pipe and keep climbing.
 - **Emergency powers.** Every run starts with one **Flow-freeze**, which locks every pipe in ice and stops the water cold, and one **Reveal**, which flips every hatch on screen open in one wave. You earn another of each every 100 rows.
 - **A shaft that fights back.** As you climb, you'll meet more rocks and one-way valves that only let water through from one side.
 - **Zone after zone.** Every 50 rows takes you into a new zone with its own look, from Zone 1 all the way to Zone 255.

@@ -1,2 +1,9 @@
 build/
 .godot/
+
+# Android build (made by .github/workflows/android.yml; never commit keys)
+/android/
+/addons/AdmobPlugin/
+/ad_units.cfg
+*.keystore
+*.jks
