@@ -4,6 +4,7 @@ build/
 # Android build (made by .github/workflows/android.yml; never commit keys)
 /android/
 /addons/AdmobPlugin/
+/addons/GMPShared/
 /ad_units.cfg
 *.keystore
 *.jks

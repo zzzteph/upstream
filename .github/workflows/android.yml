@@ -86,11 +86,14 @@ jobs:
           gh release download --repo godot-sdk-integrations/godot-admob --pattern 'AdmobPlugin-Android-*.zip' -D /tmp/admob
           ls /tmp/admob
           unzip -q -o /tmp/admob/AdmobPlugin-Android-*.zip -d /tmp/admob/x
-          # The archive holds the addon (and possibly a top-level folder): copy its addons/ in.
-          src=$(dirname "$(find /tmp/admob/x -path '*addons/AdmobPlugin/plugin.cfg' | head -1)")
-          test -n "$src"
+          # The archive's addons/ holds the plugin (AdmobPlugin) and the helper
+          # classes it needs (GMPShared): copy all of it in.
+          cfg=$(find /tmp/admob/x -path '*addons/AdmobPlugin/plugin.cfg' | head -1)
+          test -n "$cfg"
+          root=$(dirname "$(dirname "$(dirname "$cfg")")")
+          ls "$root/addons"
           mkdir -p addons
-          cp -r "$src" addons/
+          cp -r "$root/addons/." addons/
           printf '\n[editor_plugins]\n\nenabled=PackedStringArray("res://addons/AdmobPlugin/plugin.cfg")\n' >> project.godot
 
       - name: Ad settings (test ads unless the ADMOB_* variables are set)
@@ -123,8 +126,12 @@ jobs:
       - name: Export test APK
         run: |
           mkdir -p build/android
-          godot --headless --export-debug "Android APK" build/android/upstream-debug.apk
+          godot --headless --export-debug "Android APK" build/android/upstream-debug.apk 2>&1 | tee /tmp/export.log
           test -f build/android/upstream-debug.apk
+          if grep -q "SCRIPT ERROR" /tmp/export.log; then echo "Script errors during export (see above)"; exit 1; fi
+          # The AdMob SDK must be in: its app ID is in the manifest.
+          aapt2=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          "$aapt2" dump xmltree --file AndroidManifest.xml build/android/upstream-debug.apk | grep -A2 "com.google.android.gms.ads.APPLICATION_ID"
 
       - name: Export signed App Bundle (when the signing secrets are set)
         env:
