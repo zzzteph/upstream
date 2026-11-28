@@ -34,10 +34,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
+      # The runner has the Android SDK already: accept the licences and add
+      # what Godot's Gradle build needs.
       - name: Android SDK packages
-        run: sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkm=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | sort -V | tail -1)/sdkmanager
+          yes | "$sdkm" --licenses > /dev/null || true
+          "$sdkm" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" > /dev/null
 
       - name: Cache Godot and Android templates
         id: godot-cache
